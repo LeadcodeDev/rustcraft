@@ -1,0 +1,9 @@
+[package]
+name = "rustcraft_client"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+rustcraft_protocol = { path = "../rustcraft_protocol" }
+rustcraft_macros = { path = "../rustcraft_macros" }
+bevy = "0.15"

@@ -3646,8 +3646,19 @@ name = "rustcraft"
 version = "0.1.0"
 dependencies = [
  "bevy",
- "noise",
+ "rustcraft_client",
  "rustcraft_macros",
+ "rustcraft_protocol",
+ "rustcraft_server",
+]
+
+[[package]]
+name = "rustcraft_client"
+version = "0.1.0"
+dependencies = [
+ "bevy",
+ "rustcraft_macros",
+ "rustcraft_protocol",
 ]
 
 [[package]]
@@ -3657,6 +3668,22 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn",
+]
+
+[[package]]
+name = "rustcraft_protocol"
+version = "0.1.0"
+dependencies = [
+ "bevy_math",
+ "noise",
+]
+
+[[package]]
+name = "rustcraft_server"
+version = "0.1.0"
+dependencies = [
+ "bevy",
+ "rustcraft_protocol",
 ]
 
 [[package]]

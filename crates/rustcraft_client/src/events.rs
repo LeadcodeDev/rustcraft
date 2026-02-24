@@ -189,6 +189,12 @@ impl EventsPlugin {
         }
     }
 
+    pub fn new_with(plugins: Vec<Box<dyn RustcraftPlugin>>) -> Self {
+        Self {
+            plugins: std::sync::Mutex::new(plugins),
+        }
+    }
+
     pub fn add_plugin(self, plugin: impl RustcraftPlugin) -> Self {
         self.plugins.lock().unwrap().push(Box::new(plugin));
         self

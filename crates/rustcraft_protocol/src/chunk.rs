@@ -1,13 +1,12 @@
-use bevy::prelude::*;
 use std::collections::HashMap;
 
-use super::block::BlockType;
+use crate::block::BlockType;
 
 pub const CHUNK_SIZE: usize = 16;
 pub const CHUNK_HEIGHT: usize = 64;
 pub const BLOCKS_PER_CHUNK: usize = CHUNK_SIZE * CHUNK_SIZE * CHUNK_HEIGHT;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Component)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ChunkPos(pub i32, pub i32);
 
 pub struct Chunk {
@@ -43,7 +42,13 @@ impl Chunk {
     }
 }
 
-#[derive(Resource, Default)]
+impl Default for Chunk {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[derive(Default)]
 pub struct ChunkMap {
     pub chunks: HashMap<ChunkPos, Chunk>,
 }

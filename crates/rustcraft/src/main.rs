@@ -1,15 +1,8 @@
-mod avatar;
-mod dropped_item;
-mod events;
-mod interaction;
-mod inventory;
-mod player;
-mod render;
-mod ui;
-mod world;
-
 use bevy::prelude::*;
 use rustcraft_macros::craft_plugin;
+
+use rustcraft_client::events;
+use rustcraft_protocol::transport::create_local_transport;
 
 struct LogPlugin;
 
@@ -68,6 +61,8 @@ impl LogPlugin {
 }
 
 fn main() {
+    let (client_transport, server_transport) = create_local_transport();
+
     App::new()
         .add_plugins(DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window {
@@ -76,15 +71,15 @@ fn main() {
             }),
             ..default()
         }))
-        .add_plugins(events::EventsPlugin::new().add_plugin(LogPlugin))
-        .add_plugins(world::WorldPlugin)
-        .add_plugins(render::RenderPlugin)
-        .add_plugins(player::PlayerPlugin)
-        .add_plugins(inventory::InventoryPlugin)
-        .add_plugins(interaction::InteractionPlugin)
-        .add_plugins(ui::UiPlugin)
-        .add_plugins(dropped_item::DroppedItemPlugin)
-        .add_plugins(avatar::AvatarPlugin)
+        .add_plugins(rustcraft_server::ServerPlugin::new(
+            server_transport,
+            "Default World",
+            42,
+        ))
+        .add_plugins(
+            rustcraft_client::ClientPlugin::new(Box::new(client_transport))
+                .with_plugin(LogPlugin),
+        )
         .add_systems(Startup, setup_lighting)
         .run();
 }

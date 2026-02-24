@@ -4,7 +4,7 @@ use bevy::prelude::*;
 
 use crate::inventory::Inventory;
 use crate::player::camera::{FlyCam, GameState, Player, EYE_HEIGHT};
-use crate::world::block::BlockType;
+use crate::world::block::{BlockColor, BlockType};
 
 // --- Colors ---
 

@@ -13,34 +13,36 @@ pub struct RenderPlugin;
 
 impl Plugin for RenderPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(
-            Startup,
-            spawn_chunk_meshes.after(crate::world::generation::generate_world),
-        )
-        .add_systems(Update, remesh_dirty_chunks);
+        app.add_systems(Update, (spawn_new_chunk_meshes, remesh_dirty_chunks));
     }
 }
 
-fn spawn_chunk_meshes(
+/// Spawns mesh entities for newly-loaded chunks.
+fn spawn_new_chunk_meshes(
     mut commands: Commands,
     chunk_map: Res<ChunkMap>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    mut spawned: Local<std::collections::HashSet<ChunkPos>>,
 ) {
-    let material = materials.add(StandardMaterial {
-        base_color: Color::WHITE,
-        perceptual_roughness: 0.9,
-        cull_mode: None,
-        ..default()
-    });
-
     for (&chunk_pos, _chunk) in &chunk_map.chunks {
+        if spawned.contains(&chunk_pos) {
+            continue;
+        }
+
+        let material = materials.add(StandardMaterial {
+            base_color: Color::WHITE,
+            perceptual_roughness: 0.9,
+            cull_mode: None,
+            ..default()
+        });
+
         let mesh = build_chunk_mesh(chunk_pos, &chunk_map);
         let mesh_handle = meshes.add(mesh);
 
         commands.spawn((
             Mesh3d(mesh_handle),
-            MeshMaterial3d(material.clone()),
+            MeshMaterial3d(material),
             Transform::from_xyz(
                 (chunk_pos.0 * CHUNK_SIZE as i32) as f32,
                 0.0,
@@ -48,6 +50,8 @@ fn spawn_chunk_meshes(
             ),
             ChunkEntity(chunk_pos),
         ));
+
+        spawned.insert(chunk_pos);
     }
 }
 

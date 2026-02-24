@@ -6,6 +6,12 @@ use crate::avatar::CameraMode;
 use crate::events::{GameModeChangedEvent, PlayerMovedEvent};
 use crate::world::chunk::ChunkMap;
 
+use rustcraft_protocol::physics::{
+    GRAVITY, JUMP_VELOCITY, TERMINAL_VELOCITY, is_on_ground, move_with_collision,
+};
+
+pub use rustcraft_protocol::physics::EYE_HEIGHT;
+
 #[derive(Component)]
 pub struct FlyCam;
 
@@ -73,13 +79,6 @@ pub enum GameState {
     InInventory,
 }
 
-const PLAYER_HALF_WIDTH: f32 = 0.3;
-const PLAYER_HEIGHT: f32 = 1.8;
-pub const EYE_HEIGHT: f32 = 1.7;
-const GRAVITY: f32 = 32.0;
-const JUMP_VELOCITY: f32 = 9.0;
-const TERMINAL_VELOCITY: f32 = 78.4;
-
 pub fn spawn_camera(mut commands: Commands) {
     let eye_pos = Vec3::new(64.0, 40.0, 64.0);
     let feet_pos = eye_pos - Vec3::new(0.0, EYE_HEIGHT, 0.0);
@@ -131,84 +130,6 @@ pub fn camera_look(
 
         transform.rotation = Quat::from_euler(EulerRot::YXZ, yaw, pitch, 0.0);
     }
-}
-
-fn collides_with_world(pos: Vec3, chunk_map: &ChunkMap) -> bool {
-    let min_x = (pos.x - PLAYER_HALF_WIDTH).floor() as i32;
-    let max_x = (pos.x + PLAYER_HALF_WIDTH - 0.001).floor() as i32;
-    let min_y = pos.y.floor() as i32;
-    let max_y = (pos.y + PLAYER_HEIGHT - 0.001).floor() as i32;
-    let min_z = (pos.z - PLAYER_HALF_WIDTH).floor() as i32;
-    let max_z = (pos.z + PLAYER_HALF_WIDTH - 0.001).floor() as i32;
-
-    for bx in min_x..=max_x {
-        for by in min_y..=max_y {
-            for bz in min_z..=max_z {
-                if chunk_map.get_block(bx, by, bz).is_solid() {
-                    return true;
-                }
-            }
-        }
-    }
-    false
-}
-
-fn is_on_ground(pos: Vec3, chunk_map: &ChunkMap) -> bool {
-    let check_pos = Vec3::new(pos.x, pos.y - 0.001, pos.z);
-    let min_x = (check_pos.x - PLAYER_HALF_WIDTH).floor() as i32;
-    let max_x = (check_pos.x + PLAYER_HALF_WIDTH - 0.001).floor() as i32;
-    let min_z = (check_pos.z - PLAYER_HALF_WIDTH).floor() as i32;
-    let max_z = (check_pos.z + PLAYER_HALF_WIDTH - 0.001).floor() as i32;
-    let by = (check_pos.y).floor() as i32;
-
-    for bx in min_x..=max_x {
-        for bz in min_z..=max_z {
-            if chunk_map.get_block(bx, by, bz).is_solid() {
-                return true;
-            }
-        }
-    }
-    false
-}
-
-fn move_with_collision(current_pos: Vec3, delta: Vec3, chunk_map: &ChunkMap) -> (Vec3, bool, bool) {
-    let mut pos = current_pos;
-    let mut hit_floor = false;
-    let mut hit_ceiling = false;
-
-    // X axis
-    pos.x += delta.x;
-    if collides_with_world(pos, chunk_map) {
-        if delta.x > 0.0 {
-            pos.x = (pos.x + PLAYER_HALF_WIDTH).floor() - PLAYER_HALF_WIDTH;
-        } else {
-            pos.x = (pos.x - PLAYER_HALF_WIDTH).floor() + 1.0 + PLAYER_HALF_WIDTH;
-        }
-    }
-
-    // Y axis
-    pos.y += delta.y;
-    if collides_with_world(pos, chunk_map) {
-        if delta.y > 0.0 {
-            pos.y = (pos.y + PLAYER_HEIGHT).floor() - PLAYER_HEIGHT;
-            hit_ceiling = true;
-        } else {
-            pos.y = pos.y.floor() + 1.0;
-            hit_floor = true;
-        }
-    }
-
-    // Z axis
-    pos.z += delta.z;
-    if collides_with_world(pos, chunk_map) {
-        if delta.z > 0.0 {
-            pos.z = (pos.z + PLAYER_HALF_WIDTH).floor() - PLAYER_HALF_WIDTH;
-        } else {
-            pos.z = (pos.z - PLAYER_HALF_WIDTH).floor() + 1.0 + PLAYER_HALF_WIDTH;
-        }
-    }
-
-    (pos, hit_floor, hit_ceiling)
 }
 
 pub fn camera_movement(
@@ -278,7 +199,7 @@ pub fn camera_movement(
                     horizontal = horizontal.normalize();
                 }
 
-                player.grounded = is_on_ground(player.position, &chunk_map);
+                player.grounded = is_on_ground(player.position, &chunk_map.0);
 
                 if keys.just_pressed(KeyCode::Space) && player.grounded {
                     player.velocity_y = JUMP_VELOCITY;
@@ -298,7 +219,7 @@ pub fn camera_movement(
 
         let old_pos = player.position;
         let (new_pos, hit_floor, hit_ceiling) =
-            move_with_collision(player.position, delta, &chunk_map);
+            move_with_collision(player.position, delta, &chunk_map.0);
         player.position = new_pos;
 
         if *game_mode == GameMode::Survival {

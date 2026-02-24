@@ -4,7 +4,7 @@ use bevy::render::render_resource::{
     Extent3d, TextureDescriptor, TextureDimension, TextureFormat, TextureUsages,
 };
 
-use crate::world::block::BlockType;
+use crate::world::block::{BlockColor, BlockType};
 
 const PREVIEW_SIZE: u32 = 64;
 const PREVIEW_RENDER_LAYER: usize = 10;

@@ -1,8 +1,4 @@
-use bevy::input::mouse::MouseWheel;
-use bevy::prelude::*;
-
-use crate::player::camera::GameState;
-use crate::world::block::BlockType;
+use crate::block::BlockType;
 
 pub const MAX_STACK: u32 = 64;
 
@@ -21,7 +17,6 @@ impl ItemStack {
     }
 }
 
-#[derive(Resource)]
 pub struct Inventory {
     pub slots: [Option<ItemStack>; 36],
     pub active_slot: usize,
@@ -99,56 +94,5 @@ impl Inventory {
             }
         }
         count
-    }
-}
-
-pub struct InventoryPlugin;
-
-impl Plugin for InventoryPlugin {
-    fn build(&self, app: &mut App) {
-        app.init_resource::<Inventory>()
-            .add_systems(Update, scroll_hotbar);
-    }
-}
-
-fn scroll_hotbar(
-    game_state: Res<GameState>,
-    mut mouse_wheel: EventReader<MouseWheel>,
-    keys: Res<ButtonInput<KeyCode>>,
-    mut inventory: ResMut<Inventory>,
-) {
-    if *game_state != GameState::Playing {
-        return;
-    }
-
-    for event in mouse_wheel.read() {
-        // macOS natural scrolling: delta.y > 0 = next slot, delta.y < 0 = previous slot
-        if event.y > 0.0 {
-            inventory.active_slot = (inventory.active_slot + 1) % 9;
-        } else if event.y < 0.0 {
-            if inventory.active_slot == 0 {
-                inventory.active_slot = 8;
-            } else {
-                inventory.active_slot -= 1;
-            }
-        }
-    }
-
-    let key_mappings = [
-        (KeyCode::Digit1, 0),
-        (KeyCode::Digit2, 1),
-        (KeyCode::Digit3, 2),
-        (KeyCode::Digit4, 3),
-        (KeyCode::Digit5, 4),
-        (KeyCode::Digit6, 5),
-        (KeyCode::Digit7, 6),
-        (KeyCode::Digit8, 7),
-        (KeyCode::Digit9, 8),
-    ];
-
-    for (key, slot) in key_mappings {
-        if keys.just_pressed(key) {
-            inventory.active_slot = slot;
-        }
     }
 }

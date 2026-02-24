@@ -3,6 +3,7 @@ use bevy::prelude::*;
 use crate::events::{ItemDroppedToWorldEvent, ItemsCollectedEvent};
 use crate::inventory::{Inventory, ItemStack};
 use crate::player::camera::{FlyCam, Player};
+use crate::world::block::BlockColor;
 use crate::world::chunk::ChunkMap;
 
 const PICKUP_RADIUS: f32 = 2.0;
@@ -153,7 +154,10 @@ fn dropped_item_physics(
         let new_x = transform.translation.x + item.velocity.x * dt;
         let by = transform.translation.y.floor() as i32;
         let bz = transform.translation.z.floor() as i32;
-        if chunk_map.get_block(new_x.floor() as i32, by, bz).is_solid() {
+        if chunk_map
+            .get_block(new_x.floor() as i32, by, bz)
+            .is_solid()
+        {
             item.velocity.x = 0.0;
         } else {
             transform.translation.x = new_x;
@@ -162,7 +166,10 @@ fn dropped_item_physics(
         // Move Z
         let new_z = transform.translation.z + item.velocity.z * dt;
         let bx = transform.translation.x.floor() as i32;
-        if chunk_map.get_block(bx, by, new_z.floor() as i32).is_solid() {
+        if chunk_map
+            .get_block(bx, by, new_z.floor() as i32)
+            .is_solid()
+        {
             item.velocity.z = 0.0;
         } else {
             transform.translation.z = new_z;

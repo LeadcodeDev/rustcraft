@@ -92,7 +92,7 @@ pub fn craft_plugin(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let expanded = quote! {
         #input
 
-        impl crate::events::RustcraftPlugin for #self_ty {
+        impl rustcraft_client::events::RustcraftPlugin for #self_ty {
             #(#trait_methods)*
         }
     };

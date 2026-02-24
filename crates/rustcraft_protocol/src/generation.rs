@@ -1,17 +1,16 @@
 use noise::{NoiseFn, Perlin};
 
-use super::block::BlockType;
-use super::chunk::{CHUNK_HEIGHT, CHUNK_SIZE, Chunk, ChunkMap, ChunkPos};
+use crate::block::BlockType;
+use crate::chunk::{CHUNK_HEIGHT, CHUNK_SIZE, Chunk, ChunkMap, ChunkPos};
 
-const WORLD_CHUNKS: i32 = 8;
+pub const WORLD_CHUNKS: i32 = 8;
 const BASE_HEIGHT: f64 = 20.0;
 const AMPLITUDE: f64 = 15.0;
 const NOISE_SCALE: f64 = 0.02;
 const SAND_LEVEL: i32 = 14;
-const SEED: u32 = 42;
 
-pub fn generate_world(mut chunk_map: bevy::prelude::ResMut<ChunkMap>) {
-    let perlin = Perlin::new(SEED);
+pub fn generate_world(chunk_map: &mut ChunkMap, seed: u32) {
+    let perlin = Perlin::new(seed);
 
     for cx in 0..WORLD_CHUNKS {
         for cz in 0..WORLD_CHUNKS {

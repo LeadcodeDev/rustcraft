@@ -2,6 +2,7 @@ use bevy::prelude::*;
 use bevy::render::mesh::{Indices, PrimitiveTopology};
 use bevy::render::render_asset::RenderAssetUsages;
 
+use crate::world::block::BlockColor;
 use crate::world::chunk::{CHUNK_HEIGHT, CHUNK_SIZE, ChunkMap, ChunkPos};
 
 struct FaceDef {
