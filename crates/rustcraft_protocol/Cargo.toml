@@ -4,5 +4,8 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-bevy_math = "0.15"
+bevy_math = { version = "0.15", features = ["serialize"] }
 noise = "0.9"
+serde = { version = "1", features = ["derive"] }
+bincode = "1"
+flate2 = "1"

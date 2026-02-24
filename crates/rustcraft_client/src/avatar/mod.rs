@@ -2,7 +2,9 @@ use std::f32::consts::PI;
 
 use bevy::prelude::*;
 
+use crate::events::{PlayerJoinEvent, PlayerLeaveEvent};
 use crate::inventory::Inventory;
+use crate::network::RemotePlayerStates;
 use crate::player::camera::{FlyCam, GameState, Player, EYE_HEIGHT};
 use crate::world::block::{BlockColor, BlockType};
 
@@ -76,6 +78,16 @@ pub enum CameraMode {
     ThirdPerson,
 }
 
+// --- Remote player components ---
+
+#[derive(Component)]
+pub struct RemotePlayer {
+    pub id: u64,
+}
+
+#[derive(Component)]
+pub struct RemotePlayerNameTag;
+
 // --- Plugin ---
 
 pub struct AvatarPlugin;
@@ -99,6 +111,9 @@ impl Plugin for AvatarPlugin {
                     adjust_camera_for_mode
                         .after(crate::player::camera::camera_movement)
                         .after(sync_avatar_position),
+                    spawn_remote_player,
+                    despawn_remote_player,
+                    update_remote_players,
                 ),
             );
     }
@@ -581,10 +596,8 @@ fn adjust_camera_for_mode(
 
     match *camera_mode {
         CameraMode::FirstPerson => {
-            // Place eyes at the front surface of the head (offset forward by half head depth)
-            let forward = Vec3::new(-yaw.sin(), 0.0, -yaw.cos());
-            cam_transform.translation =
-                player.position + Vec3::Y * EYE_HEIGHT + forward * 0.25;
+            // In first person, camera_movement already positions the camera
+            // with the forward offset. Nothing to do here.
         }
         CameraMode::ThirdPerson => {
             // Spherical offset: camera orbits behind the player
@@ -596,6 +609,146 @@ fn adjust_camera_for_mode(
 
             let eye_center = player.position + Vec3::Y * EYE_HEIGHT;
             cam_transform.translation = eye_center + offset;
+        }
+    }
+}
+
+// --- Remote player systems ---
+
+const REMOTE_LERP_SPEED: f32 = 12.0;
+
+fn spawn_remote_player(
+    mut commands: Commands,
+    mut ev_join: EventReader<PlayerJoinEvent>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    for event in ev_join.read() {
+        let skin_mat = materials.add(StandardMaterial {
+            base_color: SKIN_COLOR,
+            ..default()
+        });
+        let shirt_mat = materials.add(StandardMaterial {
+            base_color: SHIRT_COLOR,
+            ..default()
+        });
+        let pants_mat = materials.add(StandardMaterial {
+            base_color: PANTS_COLOR,
+            ..default()
+        });
+        let shoe_mat = materials.add(StandardMaterial {
+            base_color: SHOE_COLOR,
+            ..default()
+        });
+
+        let head_mesh = meshes.add(Cuboid::new(0.50, 0.50, 0.50));
+        let torso_mesh = meshes.add(Cuboid::new(0.60, 0.55, 0.30));
+        let arm_mesh = meshes.add(Cuboid::new(0.20, 0.55, 0.20));
+        let leg_mesh = meshes.add(Cuboid::new(0.25, 0.65, 0.25));
+
+        commands
+            .spawn((
+                RemotePlayer { id: event.player_id },
+                Transform::from_translation(event.position),
+                GlobalTransform::default(),
+                Visibility::Visible,
+                InheritedVisibility::default(),
+                ViewVisibility::default(),
+            ))
+            .with_children(|root| {
+                // Head
+                root.spawn((
+                    Mesh3d(head_mesh),
+                    MeshMaterial3d(skin_mat),
+                    Transform::from_translation(Vec3::new(0.0, 1.55, 0.0)),
+                ));
+
+                // Torso
+                root.spawn((
+                    Mesh3d(torso_mesh),
+                    MeshMaterial3d(shirt_mat),
+                    Transform::from_translation(Vec3::new(0.0, 0.975, 0.0)),
+                ));
+
+                // Left Arm
+                root.spawn((
+                    Mesh3d(arm_mesh.clone()),
+                    MeshMaterial3d(pants_mat.clone()),
+                    Transform::from_translation(Vec3::new(0.40, 0.975, 0.0)),
+                ));
+
+                // Right Arm
+                root.spawn((
+                    Mesh3d(arm_mesh),
+                    MeshMaterial3d(pants_mat.clone()),
+                    Transform::from_translation(Vec3::new(-0.40, 0.975, 0.0)),
+                ));
+
+                // Left Leg
+                root.spawn((
+                    Mesh3d(leg_mesh.clone()),
+                    MeshMaterial3d(shoe_mat.clone()),
+                    Transform::from_translation(Vec3::new(0.15, 0.325, 0.0)),
+                ));
+
+                // Right Leg
+                root.spawn((
+                    Mesh3d(leg_mesh),
+                    MeshMaterial3d(shoe_mat),
+                    Transform::from_translation(Vec3::new(-0.15, 0.325, 0.0)),
+                ));
+
+                // Name tag
+                root.spawn((
+                    RemotePlayerNameTag,
+                    Text2d::new(event.name.clone()),
+                    TextFont {
+                        font_size: 24.0,
+                        ..default()
+                    },
+                    Transform::from_translation(Vec3::new(0.0, 2.1, 0.0))
+                        .with_scale(Vec3::splat(0.01)),
+                ));
+            });
+
+        info!(
+            "Spawned remote player '{}' (id={})",
+            event.name, event.player_id
+        );
+    }
+}
+
+fn despawn_remote_player(
+    mut commands: Commands,
+    mut ev_leave: EventReader<PlayerLeaveEvent>,
+    query: Query<(Entity, &RemotePlayer)>,
+) {
+    for event in ev_leave.read() {
+        for (entity, remote) in &query {
+            if remote.id == event.player_id {
+                commands.entity(entity).despawn();
+                info!("Despawned remote player (id={})", event.player_id);
+            }
+        }
+    }
+}
+
+fn update_remote_players(
+    time: Res<Time>,
+    remote_states: Res<RemotePlayerStates>,
+    mut query: Query<(&RemotePlayer, &mut Transform)>,
+) {
+    let dt = time.delta_secs();
+
+    for (remote, mut transform) in &mut query {
+        if let Some(target) = remote_states.players.get(&remote.id) {
+            // Lerp position for smooth movement
+            transform.translation = transform
+                .translation
+                .lerp(target.position, (REMOTE_LERP_SPEED * dt).min(1.0));
+
+            // Apply yaw rotation
+            transform.rotation = Quat::from_rotation_y(target.yaw);
         }
     }
 }

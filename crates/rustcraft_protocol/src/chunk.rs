@@ -1,10 +1,13 @@
 use std::collections::HashMap;
 
+use bevy_math::Vec3;
+
 use crate::block::BlockType;
 
 pub const CHUNK_SIZE: usize = 16;
 pub const CHUNK_HEIGHT: usize = 64;
 pub const BLOCKS_PER_CHUNK: usize = CHUNK_SIZE * CHUNK_SIZE * CHUNK_HEIGHT;
+pub const VIEW_DISTANCE: i32 = 8;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ChunkPos(pub i32, pub i32);
@@ -102,4 +105,17 @@ impl ChunkMap {
             }
         }
     }
+}
+
+/// Returns all chunk positions within a square radius around a world position.
+pub fn chunks_in_view_radius(pos: Vec3, radius: i32) -> Vec<ChunkPos> {
+    let cx = (pos.x as i32).div_euclid(CHUNK_SIZE as i32);
+    let cz = (pos.z as i32).div_euclid(CHUNK_SIZE as i32);
+    let mut result = Vec::with_capacity(((2 * radius + 1) * (2 * radius + 1)) as usize);
+    for x in (cx - radius)..=(cx + radius) {
+        for z in (cz - radius)..=(cz + radius) {
+            result.push(ChunkPos(x, z));
+        }
+    }
+    result
 }

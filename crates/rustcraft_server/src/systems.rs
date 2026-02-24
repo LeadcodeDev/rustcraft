@@ -1,6 +1,9 @@
 use bevy::prelude::*;
 
+use std::collections::HashSet;
+
 use rustcraft_protocol::block::BlockType;
+use rustcraft_protocol::chunk::{ChunkPos, VIEW_DISTANCE, chunks_in_view_radius};
 use rustcraft_protocol::game_mode::GameMode;
 use rustcraft_protocol::inventory::ItemStack;
 use rustcraft_protocol::physics::{
@@ -26,19 +29,150 @@ pub fn server_process_messages(
     let messages = transport.0.receive();
 
     for (client_id, msg) in messages {
-        // Destructure session for independent field access
-        let WorldSession {
-            ref mut chunk_map,
-            ref mut players,
-            ref mut inventories,
-            ref mut dropped_items,
-            ref mut next_entity_id,
-            ..
-        } = *session;
-
         match msg {
+            ClientMessage::Connect {
+                auth_code,
+                player_name,
+            } => {
+                if auth_code != session.auth_code {
+                    transport.0.send(
+                        client_id,
+                        ServerMessage::ConnectRejected {
+                            reason: "Invalid auth code".to_string(),
+                        },
+                    );
+                    transport.0.disconnect(client_id);
+                    continue;
+                }
+
+                // Send existing players to the new client
+                let existing_players: Vec<_> = session
+                    .players
+                    .iter()
+                    .map(|(&id, p)| {
+                        let name = session
+                            .player_names
+                            .get(&id)
+                            .cloned()
+                            .unwrap_or_default();
+                        (id, name, p.position)
+                    })
+                    .collect();
+
+                // Add the new player
+                let player_state = session.add_player(client_id, player_name.clone());
+                let position = player_state.position;
+
+                // Send ConnectAccepted
+                transport.0.send(
+                    client_id,
+                    ServerMessage::ConnectAccepted {
+                        player_id: client_id,
+                    },
+                );
+
+                // Send initial inventory
+                if let Some(inv) = session.inventories.get(&client_id) {
+                    transport.0.send(
+                        client_id,
+                        ServerMessage::InventoryUpdate {
+                            slots: inv.slots.to_vec(),
+                            active_slot: inv.active_slot,
+                        },
+                    );
+                }
+
+                // Send existing players to the new client
+                for (id, name, pos) in &existing_players {
+                    transport.0.send(
+                        client_id,
+                        ServerMessage::PlayerJoined {
+                            player_id: *id,
+                            name: name.clone(),
+                            position: *pos,
+                        },
+                    );
+                }
+
+                // Broadcast PlayerJoined to all other clients
+                for &other_id in session.players.keys() {
+                    if other_id != client_id {
+                        transport.0.send(
+                            other_id,
+                            ServerMessage::PlayerJoined {
+                                player_id: client_id,
+                                name: player_name.clone(),
+                                position,
+                            },
+                        );
+                    }
+                }
+
+                // Send game mode
+                if let Some(player) = session.players.get(&client_id) {
+                    transport.0.send(
+                        client_id,
+                        ServerMessage::GameModeChanged {
+                            mode: player.game_mode,
+                        },
+                    );
+                }
+
+                // Send initial chunks around player position (streaming will keep them updated)
+                let initial_chunks = chunks_in_view_radius(position, VIEW_DISTANCE);
+                for chunk_pos in &initial_chunks {
+                    session.ensure_chunk_loaded(*chunk_pos);
+                    if let Some(chunk) = session.chunk_map.chunks.get(chunk_pos) {
+                        transport.0.send(
+                            client_id,
+                            ServerMessage::ChunkData {
+                                pos: (chunk_pos.0, chunk_pos.1),
+                                blocks: chunk.blocks.clone(),
+                            },
+                        );
+                    }
+                }
+                // Mark these chunks as loaded for this player
+                let loaded_set: std::collections::HashSet<_> =
+                    initial_chunks.into_iter().collect();
+                session
+                    .loaded_chunks_per_player
+                    .insert(client_id, loaded_set);
+
+                info!(
+                    "Player '{}' (id={}) connected",
+                    player_name, client_id
+                );
+            }
+
+            ClientMessage::Disconnect => {
+                let name = session
+                    .player_names
+                    .get(&client_id)
+                    .cloned()
+                    .unwrap_or_default();
+                session.remove_player(client_id);
+
+                // Broadcast PlayerLeft to all remaining clients
+                for &other_id in session.players.keys() {
+                    transport.0.send(
+                        other_id,
+                        ServerMessage::PlayerLeft {
+                            player_id: client_id,
+                        },
+                    );
+                }
+
+                // Save if last player
+                if session.players.is_empty() {
+                    session.save_to_disk();
+                }
+
+                info!("Player '{}' (id={}) disconnected", name, client_id);
+            }
+
             ClientMessage::InputCommand {
-                sequence,
+                sequence: _,
                 dt,
                 yaw,
                 pitch,
@@ -49,6 +183,13 @@ pub fn server_process_messages(
                 jump,
                 sneak,
             } => {
+                // Destructure session for independent field access
+                let WorldSession {
+                    ref mut chunk_map,
+                    ref mut players,
+                    ..
+                } = *session;
+
                 let Some(player) = players.get_mut(&client_id) else {
                     continue;
                 };
@@ -145,15 +286,23 @@ pub fn server_process_messages(
                     }
                 }
 
-                transport.0.send(
-                    client_id,
-                    ServerMessage::PlayerStateUpdate {
-                        last_processed_input: sequence,
-                        position: player.position,
-                        velocity_y: player.velocity_y,
-                        grounded: player.grounded,
-                    },
-                );
+                // Broadcast position to all other players
+                let pos = player.position;
+                let player_yaw = player.yaw;
+                let player_pitch = player.pitch;
+                for &other_id in players.keys() {
+                    if other_id != client_id {
+                        transport.0.send(
+                            other_id,
+                            ServerMessage::PlayerPositionUpdate {
+                                player_id: client_id,
+                                position: pos,
+                                yaw: player_yaw,
+                                pitch: player_pitch,
+                            },
+                        );
+                    }
+                }
             }
 
             ClientMessage::BlockInteraction {
@@ -161,6 +310,15 @@ pub fn server_process_messages(
                 origin,
                 direction,
             } => {
+                let WorldSession {
+                    ref mut chunk_map,
+                    ref mut players,
+                    ref mut inventories,
+                    ref mut dropped_items,
+                    ref mut next_entity_id,
+                    ..
+                } = *session;
+
                 let Some(hit) = dda_raycast(origin, direction, chunk_map) else {
                     continue;
                 };
@@ -184,7 +342,7 @@ pub fn server_process_messages(
                             hit.block_pos.z,
                             BlockType::Air,
                         );
-                        transport.0.broadcast(ServerMessage::BlockChanged {
+                        transport.0.broadcast_except(client_id, ServerMessage::BlockChanged {
                             position: hit.block_pos,
                             new_type: BlockType::Air,
                         });
@@ -207,7 +365,7 @@ pub fn server_process_messages(
                                     age: 0.0,
                                 },
                             );
-                            transport.0.broadcast(ServerMessage::DroppedItemSpawned {
+                            transport.0.broadcast_except(client_id, ServerMessage::DroppedItemSpawned {
                                 id: entity_id,
                                 stack: ItemStack::new(old_block, 1),
                                 position: block_center,
@@ -228,16 +386,9 @@ pub fn server_process_messages(
 
                         if game_mode == GameMode::Survival {
                             inv.consume_active();
-                            transport.0.send(
-                                client_id,
-                                ServerMessage::InventoryUpdate {
-                                    slots: inv.slots.to_vec(),
-                                    active_slot: inv.active_slot,
-                                },
-                            );
                         }
 
-                        transport.0.broadcast(ServerMessage::BlockChanged {
+                        transport.0.broadcast_except(client_id, ServerMessage::BlockChanged {
                             position: place_pos,
                             new_type: block,
                         });
@@ -250,6 +401,14 @@ pub fn server_process_messages(
                 count,
                 direction,
             } => {
+                let WorldSession {
+                    ref mut players,
+                    ref mut inventories,
+                    ref mut dropped_items,
+                    ref mut next_entity_id,
+                    ..
+                } = *session;
+
                 // Copy player position before getting mutable inventory
                 let player_pos = match players.get(&client_id) {
                     Some(p) => p.position,
@@ -281,9 +440,6 @@ pub fn server_process_messages(
                     inv.slots[slot].as_mut().unwrap().count -= drop_count;
                 }
 
-                let inv_slots = inv.slots.to_vec();
-                let inv_active = inv.active_slot;
-
                 let entity_id = *next_entity_id;
                 *next_entity_id += 1;
                 dropped_items.insert(
@@ -297,24 +453,24 @@ pub fn server_process_messages(
                     },
                 );
 
-                transport.0.broadcast(ServerMessage::DroppedItemSpawned {
+                transport.0.broadcast_except(client_id, ServerMessage::DroppedItemSpawned {
                     id: entity_id,
                     stack: ItemStack::new(stack.block, drop_count),
                     position: drop_pos,
                     velocity: drop_velocity,
                 });
+            }
 
-                transport.0.send(
-                    client_id,
-                    ServerMessage::InventoryUpdate {
-                        slots: inv_slots,
-                        active_slot: inv_active,
-                    },
-                );
+            ClientMessage::ChunkEvict { pos } => {
+                // Client evicted this chunk from cache — remove from its loaded set
+                // so server_stream_chunks will re-send it if still in view distance.
+                if let Some(loaded) = session.loaded_chunks_per_player.get_mut(&client_id) {
+                    loaded.remove(&ChunkPos(pos.0, pos.1));
+                }
             }
 
             ClientMessage::ToggleGameMode => {
-                let Some(player) = players.get_mut(&client_id) else {
+                let Some(player) = session.players.get_mut(&client_id) else {
                     continue;
                 };
 
@@ -477,5 +633,110 @@ pub fn server_pickup_items(mut session: ResMut<WorldSession>, transport: Res<Ser
                 active_slot,
             },
         );
+    }
+}
+
+/// Auto-save the world periodically.
+const AUTO_SAVE_INTERVAL: u64 = 600; // ~10 seconds at 60 tps
+
+pub fn server_auto_save(mut session: ResMut<WorldSession>) {
+    session.ticks_since_save += 1;
+    if session.ticks_since_save >= AUTO_SAVE_INTERVAL {
+        session.ticks_since_save = 0;
+        session.save_to_disk();
+    }
+}
+
+/// Stream chunks to players based on their position.
+/// Sends new chunks when players move, unloads chunks they've left behind.
+pub fn server_stream_chunks(mut session: ResMut<WorldSession>, transport: Res<ServerTransportRes>) {
+    // Collect player positions and their IDs
+    let player_positions: Vec<(u64, Vec3)> = session
+        .players
+        .iter()
+        .map(|(&id, p)| (id, p.position))
+        .collect();
+
+    for (player_id, position) in &player_positions {
+        let visible: HashSet<ChunkPos> = chunks_in_view_radius(*position, VIEW_DISTANCE)
+            .into_iter()
+            .collect();
+
+        let currently_loaded = session
+            .loaded_chunks_per_player
+            .entry(*player_id)
+            .or_default();
+
+        // Find chunks to send (visible but not yet loaded for this player)
+        let to_send: Vec<ChunkPos> = visible.difference(currently_loaded).copied().collect();
+
+        // Find chunks to unload (loaded but no longer visible)
+        let to_unload: Vec<ChunkPos> = currently_loaded.difference(&visible).copied().collect();
+
+        // Send new chunks
+        for chunk_pos in &to_send {
+            session.ensure_chunk_loaded(*chunk_pos);
+            if let Some(chunk) = session.chunk_map.chunks.get(chunk_pos) {
+                transport.0.send(
+                    *player_id,
+                    ServerMessage::ChunkData {
+                        pos: (chunk_pos.0, chunk_pos.1),
+                        blocks: chunk.blocks.clone(),
+                    },
+                );
+            }
+        }
+
+        // Unload chunks from client
+        for chunk_pos in &to_unload {
+            transport.0.send(
+                *player_id,
+                ServerMessage::ChunkUnload {
+                    pos: (chunk_pos.0, chunk_pos.1),
+                },
+            );
+        }
+
+        // Update the player's loaded set
+        let loaded = session
+            .loaded_chunks_per_player
+            .entry(*player_id)
+            .or_default();
+        for pos in to_send {
+            loaded.insert(pos);
+        }
+        for pos in to_unload {
+            loaded.remove(&pos);
+        }
+    }
+
+    // Unload chunks from server memory if no player needs them
+    let all_loaded: HashSet<ChunkPos> = session
+        .loaded_chunks_per_player
+        .values()
+        .flat_map(|s| s.iter().copied())
+        .collect();
+
+    let to_remove: Vec<ChunkPos> = session
+        .chunk_map
+        .chunks
+        .keys()
+        .copied()
+        .filter(|pos| !all_loaded.contains(pos))
+        .collect();
+
+    for pos in to_remove {
+        // Save dirty chunks before removing
+        if let Some(chunk) = session.chunk_map.chunks.get(&pos) {
+            if chunk.dirty {
+                let chunks_dir = session.world_path.join("chunks");
+                let _ = std::fs::create_dir_all(&chunks_dir);
+                let path = chunks_dir.join(format!("{}_{}.dat", pos.0, pos.1));
+                if let Ok(data) = bincode::serialize(&chunk.blocks) {
+                    let _ = std::fs::write(path, data);
+                }
+            }
+        }
+        session.chunk_map.chunks.remove(&pos);
     }
 }

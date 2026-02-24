@@ -1,6 +1,8 @@
 use bevy::prelude::*;
 
-use crate::events::{InventoryDroppedEvent, InventoryPickedUpEvent, ItemDroppedToWorldEvent};
+use crate::ClientTransportRes;
+use crate::events::{InventoryDroppedEvent, InventoryPickedUpEvent};
+use rustcraft_protocol::protocol::ClientMessage;
 use crate::inventory::{Inventory, ItemStack, MAX_STACK};
 use crate::player::camera::{FlyCam, GameState, Player};
 use crate::ui::block_preview::BlockPreviews;
@@ -333,7 +335,7 @@ pub fn drag_and_drop(
     mut commands: Commands,
     mut ev_picked: EventWriter<InventoryPickedUpEvent>,
     mut ev_dropped: EventWriter<InventoryDroppedEvent>,
-    mut ev_world_drop: EventWriter<ItemDroppedToWorldEvent>,
+    transport: Res<ClientTransportRes>,
 ) {
     if *game_state != GameState::InInventory {
         return;
@@ -469,33 +471,25 @@ pub fn drag_and_drop(
             }
         }
     } else if drag_state.is_dragging() && (left_pressed || right_pressed) {
-        // Click outside inventory — drop to world
+        // Click outside inventory — drop to world via server
         let forward = transform.forward().as_vec3();
-        let drop_pos = player.position
-            + Vec3::Y * 1.7
-            + Vec3::new(forward.x, 0.0, forward.z).normalize_or_zero() * 0.5;
-        let throw_velocity = forward * 3.0 + Vec3::Y * 2.0;
-
+        let from_slot = drag_state.from_slot.unwrap_or(0);
         if left_pressed {
             // Left click: drop entire dragged stack
             let stack = drag_state.stack.unwrap();
-            ev_world_drop.send(ItemDroppedToWorldEvent {
-                block_type: stack.block,
+            transport.0.send(ClientMessage::DropItem {
+                slot: from_slot,
                 count: stack.count,
-                position: drop_pos,
-                velocity: throw_velocity,
-                player: location,
+                direction: forward,
             });
             drag_state.clear();
         } else {
             // Right click: drop 1 item
             let drag_stack = drag_state.stack.as_mut().unwrap();
-            ev_world_drop.send(ItemDroppedToWorldEvent {
-                block_type: drag_stack.block,
+            transport.0.send(ClientMessage::DropItem {
+                slot: from_slot,
                 count: 1,
-                position: drop_pos,
-                velocity: throw_velocity,
-                player: location,
+                direction: forward,
             });
             drag_stack.count -= 1;
             if drag_stack.count == 0 {

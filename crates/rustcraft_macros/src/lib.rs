@@ -13,6 +13,8 @@ fn event_to_trait_method(event_name: &str) -> Option<&'static str> {
         "InventoryDropped" => Some("on_inventory_dropped"),
         "ItemDroppedToWorld" => Some("on_item_dropped_to_world"),
         "ItemsCollected" => Some("on_items_collected"),
+        "PlayerJoin" => Some("on_player_join"),
+        "PlayerLeave" => Some("on_player_leave"),
         _ => None,
     }
 }

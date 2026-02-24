@@ -7,4 +7,5 @@ pub mod physics;
 pub mod player_state;
 pub mod protocol;
 pub mod raycast;
+pub mod tcp_transport;
 pub mod transport;

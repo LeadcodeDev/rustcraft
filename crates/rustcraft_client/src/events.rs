@@ -65,6 +65,18 @@ pub struct ItemsCollectedEvent {
     pub player: Location,
 }
 
+#[derive(Event)]
+pub struct PlayerJoinEvent {
+    pub player_id: u64,
+    pub name: String,
+    pub position: Vec3,
+}
+
+#[derive(Event)]
+pub struct PlayerLeaveEvent {
+    pub player_id: u64,
+}
+
 // --- Plugin trait ---
 
 #[allow(unused_variables)]
@@ -77,6 +89,8 @@ pub trait RustcraftPlugin: Send + Sync + 'static {
     fn on_inventory_dropped(&self, event: &InventoryDroppedEvent) {}
     fn on_item_dropped_to_world(&self, event: &ItemDroppedToWorldEvent) {}
     fn on_items_collected(&self, event: &ItemsCollectedEvent) {}
+    fn on_player_join(&self, event: &PlayerJoinEvent) {}
+    fn on_player_leave(&self, event: &PlayerLeaveEvent) {}
 }
 
 // --- Registry ---
@@ -176,6 +190,28 @@ fn dispatch_items_collected(
     }
 }
 
+fn dispatch_player_join(
+    mut reader: EventReader<PlayerJoinEvent>,
+    registry: Res<PluginRegistry>,
+) {
+    for event in reader.read() {
+        for plugin in &registry.plugins {
+            plugin.on_player_join(event);
+        }
+    }
+}
+
+fn dispatch_player_leave(
+    mut reader: EventReader<PlayerLeaveEvent>,
+    registry: Res<PluginRegistry>,
+) {
+    for event in reader.read() {
+        for plugin in &registry.plugins {
+            plugin.on_player_leave(event);
+        }
+    }
+}
+
 // --- EventsPlugin builder ---
 
 pub struct EventsPlugin {
@@ -214,6 +250,8 @@ impl Plugin for EventsPlugin {
             .add_event::<InventoryDroppedEvent>()
             .add_event::<ItemDroppedToWorldEvent>()
             .add_event::<ItemsCollectedEvent>()
+            .add_event::<PlayerJoinEvent>()
+            .add_event::<PlayerLeaveEvent>()
             .add_systems(
                 Update,
                 (
@@ -225,6 +263,8 @@ impl Plugin for EventsPlugin {
                     dispatch_inventory_dropped,
                     dispatch_item_dropped_to_world,
                     dispatch_items_collected,
+                    dispatch_player_join,
+                    dispatch_player_leave,
                 ),
             );
     }

@@ -2,7 +2,7 @@ use crate::block::BlockType;
 
 pub const MAX_STACK: u32 = 64;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ItemStack {
     pub block: BlockType,
     pub count: u32,

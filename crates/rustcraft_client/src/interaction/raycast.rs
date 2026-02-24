@@ -1,23 +1,22 @@
 use bevy::prelude::*;
 
-use crate::events::{BlockPlacedEvent, BlockRemovedEvent, ItemDroppedToWorldEvent};
+use crate::ClientTransportRes;
 use crate::inventory::Inventory;
 use crate::player::camera::{FlyCam, GameMode, GameState, Player};
-use crate::world::block::BlockType;
 use crate::world::chunk::ChunkMap;
 
+use rustcraft_protocol::block::BlockType;
+use rustcraft_protocol::protocol::{BlockAction, ClientMessage};
 use rustcraft_protocol::raycast::dda_raycast;
 
 pub fn block_interaction(
     game_state: Res<GameState>,
     game_mode: Res<GameMode>,
     mouse: Res<ButtonInput<MouseButton>>,
+    camera_query: Query<&Transform, With<FlyCam>>,
+    transport: Res<ClientTransportRes>,
     mut chunk_map: ResMut<ChunkMap>,
-    camera_query: Query<(&Transform, &Player), With<FlyCam>>,
     mut inventory: ResMut<Inventory>,
-    mut ev_placed: EventWriter<BlockPlacedEvent>,
-    mut ev_removed: EventWriter<BlockRemovedEvent>,
-    mut ev_item_drop: EventWriter<ItemDroppedToWorldEvent>,
 ) {
     if *game_state != GameState::Playing {
         return;
@@ -30,58 +29,48 @@ pub fn block_interaction(
         return;
     }
 
-    let Ok((cam_transform, player)) = camera_query.get_single() else {
+    let Ok(cam_transform) = camera_query.get_single() else {
         return;
     };
 
-    let location = player.location(cam_transform);
     let origin = cam_transform.translation;
     let direction = cam_transform.forward().as_vec3();
 
-    if let Some(hit) = dda_raycast(origin, direction, &chunk_map.0) {
-        if left {
-            let old_block = chunk_map.get_block(hit.block_pos.x, hit.block_pos.y, hit.block_pos.z);
-            chunk_map.set_block(
-                hit.block_pos.x,
-                hit.block_pos.y,
-                hit.block_pos.z,
-                BlockType::Air,
-            );
-            ev_removed.send(BlockRemovedEvent {
-                position: hit.block_pos,
-                block_type: old_block,
-                player: location,
-            });
+    let action = if left {
+        BlockAction::Break
+    } else {
+        BlockAction::Place
+    };
 
-            if *game_mode == GameMode::Survival {
-                let block_center = Vec3::new(
-                    hit.block_pos.x as f32 + 0.5,
-                    hit.block_pos.y as f32 + 0.5,
-                    hit.block_pos.z as f32 + 0.5,
+    // Apply locally first (client-side prediction)
+    if let Some(hit) = dda_raycast(origin, direction, &chunk_map.0) {
+        match action {
+            BlockAction::Break => {
+                chunk_map.set_block(
+                    hit.block_pos.x,
+                    hit.block_pos.y,
+                    hit.block_pos.z,
+                    BlockType::Air,
                 );
-                ev_item_drop.send(ItemDroppedToWorldEvent {
-                    block_type: old_block,
-                    count: 1,
-                    position: block_center,
-                    velocity: Vec3::new(0.0, 4.0, 0.0),
-                    player: location,
-                });
             }
-        } else if right {
-            if let Some(block) = inventory.active_block() {
-                let place_pos = hit.block_pos + hit.normal;
-                chunk_map.set_block(place_pos.x, place_pos.y, place_pos.z, block);
-                if *game_mode == GameMode::Survival {
-                    inventory.consume_active();
+            BlockAction::Place => {
+                if let Some(block) = inventory.active_block() {
+                    let place_pos = hit.block_pos + hit.normal;
+                    chunk_map.set_block(place_pos.x, place_pos.y, place_pos.z, block);
+                    if *game_mode == GameMode::Survival {
+                        inventory.consume_active();
+                    }
                 }
-                ev_placed.send(BlockPlacedEvent {
-                    position: place_pos,
-                    block_type: block,
-                    player: location,
-                });
             }
         }
     }
+
+    // Then send to server for authoritative validation
+    transport.0.send(ClientMessage::BlockInteraction {
+        action,
+        origin,
+        direction,
+    });
 }
 
 pub fn spawn_crosshair(mut commands: Commands) {
@@ -215,8 +204,8 @@ pub fn drop_active_item(
     time: Res<Time>,
     mut drop_state: ResMut<DropKeyState>,
     mut inventory: ResMut<Inventory>,
-    camera_query: Query<(&Transform, &Player), With<FlyCam>>,
-    mut ev_item_drop: EventWriter<ItemDroppedToWorldEvent>,
+    camera_query: Query<&Transform, With<FlyCam>>,
+    transport: Res<ClientTransportRes>,
 ) {
     if *game_state != GameState::Playing || !keys.pressed(KeyCode::KeyR) {
         drop_state.held_time = 0.0;
@@ -250,7 +239,7 @@ pub fn drop_active_item(
         }
     }
 
-    let Ok((transform, player)) = camera_query.get_single() else {
+    let Ok(transform) = camera_query.get_single() else {
         return;
     };
 
@@ -259,24 +248,19 @@ pub fn drop_active_item(
     };
 
     let drop_count = if shift { stack.count } else { 1 };
+    let direction = transform.forward().as_vec3();
 
-    let forward = transform.forward().as_vec3();
-    let drop_pos = player.position
-        + Vec3::Y * 1.7
-        + Vec3::new(forward.x, 0.0, forward.z).normalize_or_zero() * 0.5;
-
-    ev_item_drop.send(ItemDroppedToWorldEvent {
-        block_type: stack.block,
-        count: drop_count,
-        position: drop_pos,
-        velocity: forward * 3.0 + Vec3::Y * 2.0,
-        player: player.location(transform),
-    });
-
-    if shift {
-        let slot = inventory.active_slot;
+    // Apply locally first (client-side prediction)
+    let slot = inventory.active_slot;
+    if drop_count >= stack.count {
         inventory.slots[slot] = None;
     } else {
-        inventory.consume_active();
+        inventory.slots[slot].as_mut().unwrap().count -= drop_count;
     }
+
+    transport.0.send(ClientMessage::DropItem {
+        slot,
+        count: drop_count,
+        direction,
+    });
 }

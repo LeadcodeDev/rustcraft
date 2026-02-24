@@ -2,13 +2,15 @@ use bevy::input::mouse::AccumulatedMouseMotion;
 use bevy::prelude::*;
 use bevy::window::CursorGrabMode;
 
+use crate::ClientTransportRes;
 use crate::avatar::CameraMode;
-use crate::events::{GameModeChangedEvent, PlayerMovedEvent};
+use crate::events::PlayerMovedEvent;
 use crate::world::chunk::ChunkMap;
 
 use rustcraft_protocol::physics::{
     GRAVITY, JUMP_VELOCITY, TERMINAL_VELOCITY, is_on_ground, move_with_collision,
 };
+use rustcraft_protocol::protocol::ClientMessage;
 
 pub use rustcraft_protocol::physics::EYE_HEIGHT;
 
@@ -139,6 +141,7 @@ pub fn camera_movement(
     time: Res<Time>,
     chunk_map: Res<ChunkMap>,
     game_mode: Res<GameMode>,
+    transport: Res<ClientTransportRes>,
     mut ev_moved: EventWriter<PlayerMovedEvent>,
     mut query: Query<(&mut Transform, &mut Player), With<FlyCam>>,
 ) {
@@ -149,28 +152,62 @@ pub fn camera_movement(
     let dt = time.delta_secs();
 
     for (mut transform, mut player) in &mut query {
+        let (yaw, pitch, _) = transform.rotation.to_euler(EulerRot::YXZ);
+
+        let forward_pressed = keys.pressed(KeyCode::KeyW);
+        let backward_pressed = keys.pressed(KeyCode::KeyS);
+        let right_pressed = keys.pressed(KeyCode::KeyD);
+        let left_pressed = keys.pressed(KeyCode::KeyA);
+        let jump_pressed = keys.pressed(KeyCode::Space);
+        let sneak_pressed = keys.pressed(KeyCode::ShiftLeft);
+
+        let has_input = forward_pressed
+            || backward_pressed
+            || right_pressed
+            || left_pressed
+            || jump_pressed
+            || sneak_pressed;
+
+        // Only send input to server when there is actual input or player is airborne
+        let needs_server_update = has_input || !player.grounded;
+        if needs_server_update {
+            transport.0.send(ClientMessage::InputCommand {
+                sequence: 0,
+                dt,
+                yaw,
+                pitch,
+                forward: forward_pressed,
+                backward: backward_pressed,
+                left: left_pressed,
+                right: right_pressed,
+                jump: jump_pressed,
+                sneak: sneak_pressed,
+            });
+        }
+
+        // Client-side prediction: apply movement locally for instant feedback
         let forward = transform.forward().as_vec3();
         let right = transform.right().as_vec3();
 
         let delta = match *game_mode {
             GameMode::Creative => {
                 let mut velocity = Vec3::ZERO;
-                if keys.pressed(KeyCode::KeyW) {
+                if forward_pressed {
                     velocity += forward;
                 }
-                if keys.pressed(KeyCode::KeyS) {
+                if backward_pressed {
                     velocity -= forward;
                 }
-                if keys.pressed(KeyCode::KeyD) {
+                if right_pressed {
                     velocity += right;
                 }
-                if keys.pressed(KeyCode::KeyA) {
+                if left_pressed {
                     velocity -= right;
                 }
-                if keys.pressed(KeyCode::Space) {
+                if jump_pressed {
                     velocity += Vec3::Y;
                 }
-                if keys.pressed(KeyCode::ShiftLeft) {
+                if sneak_pressed {
                     velocity -= Vec3::Y;
                 }
                 if velocity != Vec3::ZERO {
@@ -183,16 +220,16 @@ pub fn camera_movement(
                 let right_xz = Vec3::new(right.x, 0.0, right.z).normalize_or_zero();
 
                 let mut horizontal = Vec3::ZERO;
-                if keys.pressed(KeyCode::KeyW) {
+                if forward_pressed {
                     horizontal += forward_xz;
                 }
-                if keys.pressed(KeyCode::KeyS) {
+                if backward_pressed {
                     horizontal -= forward_xz;
                 }
-                if keys.pressed(KeyCode::KeyD) {
+                if right_pressed {
                     horizontal += right_xz;
                 }
-                if keys.pressed(KeyCode::KeyA) {
+                if left_pressed {
                     horizontal -= right_xz;
                 }
                 if horizontal != Vec3::ZERO {
@@ -216,6 +253,12 @@ pub fn camera_movement(
                 )
             }
         };
+
+        // Skip physics when at rest (grounded, no input) to avoid micro-jitter
+        if !needs_server_update && player.grounded {
+            transform.translation = player.position + Vec3::new(0.0, EYE_HEIGHT, 0.0);
+            continue;
+        }
 
         let old_pos = player.position;
         let (new_pos, hit_floor, hit_ceiling) =
@@ -246,26 +289,13 @@ pub fn camera_movement(
 pub fn toggle_gamemode(
     game_state: Res<GameState>,
     keys: Res<ButtonInput<KeyCode>>,
-    mut game_mode: ResMut<GameMode>,
-    mut ev_changed: EventWriter<GameModeChangedEvent>,
-    mut query: Query<(&Transform, &mut Player), With<FlyCam>>,
+    transport: Res<ClientTransportRes>,
 ) {
     if *game_state != GameState::Playing {
         return;
     }
     if keys.just_pressed(KeyCode::F1) {
-        *game_mode = match *game_mode {
-            GameMode::Creative => GameMode::Survival,
-            GameMode::Survival => GameMode::Creative,
-        };
-        for (transform, mut player) in &mut query {
-            player.velocity_y = 0.0;
-            ev_changed.send(GameModeChangedEvent {
-                new_mode: *game_mode,
-                player: player.location(transform),
-            });
-        }
-        info!("GameMode: {:?}", *game_mode);
+        transport.0.send(ClientMessage::ToggleGameMode);
     }
 }
 

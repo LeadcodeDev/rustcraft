@@ -1,0 +1,10 @@
+[package]
+name = "rustcraft_dedicated_server"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+rustcraft_protocol = { path = "../rustcraft_protocol" }
+rustcraft_server = { path = "../rustcraft_server" }
+bevy = "0.15"
+clap = { version = "4", features = ["derive"] }

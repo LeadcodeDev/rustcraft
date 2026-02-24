@@ -1,32 +1,55 @@
 pub mod systems;
 pub mod world_session;
 
+use std::path::PathBuf;
 use std::sync::Mutex;
 
 use bevy::prelude::*;
 
-use rustcraft_protocol::protocol::ServerMessage;
 use rustcraft_protocol::transport::ServerTransport;
 
 use systems::{
-    ServerTransportRes, server_dropped_item_physics, server_pickup_items,
-    server_process_messages,
+    ServerTransportRes, server_auto_save, server_dropped_item_physics, server_pickup_items,
+    server_process_messages, server_stream_chunks,
 };
 use world_session::WorldSession;
 
 pub struct ServerPlugin {
     transport: Mutex<Option<Box<dyn ServerTransport>>>,
-    world_name: String,
-    seed: u32,
+    session: Mutex<Option<WorldSession>>,
+    auth_code: String,
 }
 
 impl ServerPlugin {
-    pub fn new(transport: impl ServerTransport, world_name: impl Into<String>, seed: u32) -> Self {
+    pub fn new(
+        transport: impl ServerTransport,
+        world_name: impl Into<String>,
+        seed: u32,
+    ) -> Self {
+        let name = world_name.into();
+        let world_path = PathBuf::from("worlds").join(&name);
+        let session = WorldSession::load_or_create(world_path, name, seed);
+        let auth_code = session.auth_code.clone();
         Self {
             transport: Mutex::new(Some(Box::new(transport))),
-            world_name: world_name.into(),
-            seed,
+            session: Mutex::new(Some(session)),
+            auth_code,
         }
+    }
+
+    /// Create a ServerPlugin with a pre-built session (for dedicated server).
+    pub fn with_session(transport: impl ServerTransport, session: WorldSession) -> Self {
+        let auth_code = session.auth_code.clone();
+        Self {
+            transport: Mutex::new(Some(Box::new(transport))),
+            session: Mutex::new(Some(session)),
+            auth_code,
+        }
+    }
+
+    /// Get the auth code for this server.
+    pub fn auth_code(&self) -> &str {
+        &self.auth_code
     }
 }
 
@@ -39,28 +62,27 @@ impl Plugin for ServerPlugin {
             .take()
             .expect("ServerPlugin transport already taken");
 
-        let session = WorldSession::new(self.world_name.clone(), self.seed);
+        let session = self
+            .session
+            .lock()
+            .unwrap()
+            .take()
+            .expect("ServerPlugin session already taken");
+
+        info!("Auth code: {}", session.auth_code);
+        info!("World '{}' (seed={})", session.name, session.seed);
 
         app.insert_resource(ServerTransportRes(transport))
             .insert_resource(session)
-            .add_systems(Startup, send_initial_chunk_data)
             .add_systems(
                 Update,
                 (
                     server_process_messages,
-                    server_dropped_item_physics.after(server_process_messages),
+                    server_stream_chunks.after(server_process_messages),
+                    server_dropped_item_physics.after(server_stream_chunks),
                     server_pickup_items.after(server_dropped_item_physics),
+                    server_auto_save.after(server_pickup_items),
                 ),
             );
-    }
-}
-
-/// Sends all chunk data to connected clients at startup.
-fn send_initial_chunk_data(session: Res<WorldSession>, transport: Res<ServerTransportRes>) {
-    for (&pos, chunk) in &session.chunk_map.chunks {
-        transport.0.broadcast(ServerMessage::ChunkData {
-            pos: (pos.0, pos.1),
-            blocks: chunk.blocks.clone(),
-        });
     }
 }

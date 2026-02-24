@@ -6,3 +6,7 @@ edition = "2024"
 [dependencies]
 rustcraft_protocol = { path = "../rustcraft_protocol" }
 bevy = "0.15"
+serde = { version = "1", features = ["derive"] }
+bincode = "1"
+rand = "0.8"
+noise = "0.9"
