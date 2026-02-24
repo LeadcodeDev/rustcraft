@@ -2,6 +2,7 @@ use bevy::input::mouse::AccumulatedMouseMotion;
 use bevy::prelude::*;
 use bevy::window::CursorGrabMode;
 
+use crate::avatar::CameraMode;
 use crate::events::{GameModeChangedEvent, PlayerMovedEvent};
 use crate::world::chunk::ChunkMap;
 
@@ -74,7 +75,7 @@ pub enum GameState {
 
 const PLAYER_HALF_WIDTH: f32 = 0.3;
 const PLAYER_HEIGHT: f32 = 1.8;
-const EYE_HEIGHT: f32 = 1.7;
+pub const EYE_HEIGHT: f32 = 1.7;
 const GRAVITY: f32 = 32.0;
 const JUMP_VELOCITY: f32 = 9.0;
 const TERMINAL_VELOCITY: f32 = 78.4;
@@ -104,6 +105,7 @@ pub fn initial_cursor_grab(mut windows: Query<&mut Window>) {
 
 pub fn camera_look(
     game_state: Res<GameState>,
+    camera_mode: Res<CameraMode>,
     mouse_motion: Res<AccumulatedMouseMotion>,
     settings: Res<CameraSettings>,
     mut query: Query<&mut Transform, With<FlyCam>>,
@@ -115,11 +117,17 @@ pub fn camera_look(
         return;
     }
 
+    // In first person, limit downward pitch to avoid clipping into body
+    let max_down = match *camera_mode {
+        CameraMode::FirstPerson => -1.3,
+        CameraMode::ThirdPerson => -1.54,
+    };
+
     for mut transform in &mut query {
         let (mut yaw, mut pitch, _) = transform.rotation.to_euler(EulerRot::YXZ);
         yaw -= mouse_motion.delta.x * settings.sensitivity;
         pitch -= mouse_motion.delta.y * settings.sensitivity;
-        pitch = pitch.clamp(-1.54, 1.54);
+        pitch = pitch.clamp(max_down, 1.54);
 
         transform.rotation = Quat::from_euler(EulerRot::YXZ, yaw, pitch, 0.0);
     }

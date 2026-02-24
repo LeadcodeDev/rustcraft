@@ -1,3 +1,4 @@
+mod avatar;
 mod dropped_item;
 mod events;
 mod interaction;
@@ -83,6 +84,7 @@ fn main() {
         .add_plugins(interaction::InteractionPlugin)
         .add_plugins(ui::UiPlugin)
         .add_plugins(dropped_item::DroppedItemPlugin)
+        .add_plugins(avatar::AvatarPlugin)
         .add_systems(Startup, setup_lighting)
         .run();
 }
