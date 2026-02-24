@@ -1,5 +1,6 @@
 use bevy::prelude::*;
 
+use crate::app_state::AppState;
 use crate::player::camera::GameState;
 
 #[derive(Component)]
@@ -9,12 +10,16 @@ pub struct PauseMenuRoot;
 pub struct ResumeButton;
 
 #[derive(Component)]
+pub struct QuitToMenuButton;
+
+#[derive(Component)]
 pub struct QuitButton;
 
 pub fn spawn_pause_menu(mut commands: Commands) {
     commands
         .spawn((
             PauseMenuRoot,
+            StateScoped(AppState::InGame),
             Node {
                 width: Val::Percent(100.0),
                 height: Val::Percent(100.0),
@@ -27,11 +32,12 @@ pub fn spawn_pause_menu(mut commands: Commands) {
             },
             BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.6)),
             Visibility::Hidden,
+            GlobalZIndex(10),
         ))
         .with_children(|parent| {
             // Title
             parent.spawn((
-                Text::new("Paused"),
+                Text::new("Pause"),
                 TextFont {
                     font_size: 48.0,
                     ..default()
@@ -49,7 +55,7 @@ pub fn spawn_pause_menu(mut commands: Commands) {
                     ResumeButton,
                     Button,
                     Node {
-                        width: Val::Px(200.0),
+                        width: Val::Px(250.0),
                         height: Val::Px(50.0),
                         justify_content: JustifyContent::Center,
                         align_items: AlignItems::Center,
@@ -59,7 +65,7 @@ pub fn spawn_pause_menu(mut commands: Commands) {
                 ))
                 .with_children(|btn| {
                     btn.spawn((
-                        Text::new("Resume"),
+                        Text::new("Reprendre"),
                         TextFont {
                             font_size: 24.0,
                             ..default()
@@ -68,13 +74,38 @@ pub fn spawn_pause_menu(mut commands: Commands) {
                     ));
                 });
 
-            // Quit button
+            // Quit to menu button
+            parent
+                .spawn((
+                    QuitToMenuButton,
+                    Button,
+                    Node {
+                        width: Val::Px(250.0),
+                        height: Val::Px(50.0),
+                        justify_content: JustifyContent::Center,
+                        align_items: AlignItems::Center,
+                        ..default()
+                    },
+                    BackgroundColor(Color::srgb(0.3, 0.3, 0.3)),
+                ))
+                .with_children(|btn| {
+                    btn.spawn((
+                        Text::new("Retour au menu"),
+                        TextFont {
+                            font_size: 24.0,
+                            ..default()
+                        },
+                        TextColor(Color::WHITE),
+                    ));
+                });
+
+            // Quit game button
             parent
                 .spawn((
                     QuitButton,
                     Button,
                     Node {
-                        width: Val::Px(200.0),
+                        width: Val::Px(250.0),
                         height: Val::Px(50.0),
                         justify_content: JustifyContent::Center,
                         align_items: AlignItems::Center,
@@ -84,7 +115,7 @@ pub fn spawn_pause_menu(mut commands: Commands) {
                 ))
                 .with_children(|btn| {
                     btn.spawn((
-                        Text::new("Quit"),
+                        Text::new("Quitter le jeu"),
                         TextFont {
                             font_size: 24.0,
                             ..default()
@@ -126,6 +157,17 @@ pub fn handle_resume_button(
     }
 }
 
+pub fn handle_quit_to_menu_button(
+    interaction: Query<&Interaction, (Changed<Interaction>, With<QuitToMenuButton>)>,
+    mut next_state: ResMut<NextState<AppState>>,
+) {
+    for &inter in &interaction {
+        if inter == Interaction::Pressed {
+            next_state.set(AppState::MainMenu);
+        }
+    }
+}
+
 pub fn handle_quit_button(
     interaction: Query<&Interaction, (Changed<Interaction>, With<QuitButton>)>,
     mut app_exit: EventWriter<AppExit>,
@@ -139,20 +181,20 @@ pub fn handle_quit_button(
 
 pub fn button_hover(
     mut query: Query<
-        (&Interaction, &mut BackgroundColor, Option<&ResumeButton>),
+        (&Interaction, &mut BackgroundColor, Option<&QuitButton>),
         (Changed<Interaction>, With<Button>),
     >,
 ) {
-    for (interaction, mut bg, is_resume) in &mut query {
-        let base = if is_resume.is_some() {
-            Color::srgb(0.3, 0.3, 0.3)
-        } else {
+    for (interaction, mut bg, is_quit) in &mut query {
+        let base = if is_quit.is_some() {
             Color::srgb(0.5, 0.15, 0.15)
-        };
-        let hover = if is_resume.is_some() {
-            Color::srgb(0.4, 0.4, 0.4)
         } else {
+            Color::srgb(0.3, 0.3, 0.3)
+        };
+        let hover = if is_quit.is_some() {
             Color::srgb(0.6, 0.2, 0.2)
+        } else {
+            Color::srgb(0.4, 0.4, 0.4)
         };
 
         *bg = match interaction {

@@ -1,6 +1,7 @@
 use bevy::prelude::*;
 
 use crate::ClientTransportRes;
+use crate::app_state::AppState;
 use crate::inventory::Inventory;
 use crate::player::camera::{FlyCam, GameMode, GameState, Player};
 use crate::world::chunk::ChunkMap;
@@ -75,13 +76,13 @@ pub fn block_interaction(
 
 pub fn spawn_crosshair(mut commands: Commands) {
     commands
-        .spawn(Node {
+        .spawn((StateScoped(AppState::InGame), Node {
             width: Val::Percent(100.0),
             height: Val::Percent(100.0),
             justify_content: JustifyContent::Center,
             align_items: AlignItems::Center,
             ..default()
-        })
+        }))
         .with_children(|parent| {
             parent.spawn((
                 Node {
@@ -115,6 +116,7 @@ pub fn spawn_debug_overlay(mut commands: Commands) {
     commands
         .spawn((
             DebugOverlayRoot,
+            StateScoped(AppState::InGame),
             Node {
                 position_type: PositionType::Absolute,
                 top: Val::Px(10.0),

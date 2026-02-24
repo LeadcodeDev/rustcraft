@@ -1,3 +1,4 @@
+pub mod app_state;
 pub mod avatar;
 pub mod dropped_item;
 pub mod events;
@@ -6,16 +7,20 @@ pub mod inventory;
 pub mod network;
 pub mod player;
 pub mod render;
+pub mod session;
 pub mod ui;
 pub mod world;
 
 use std::sync::Mutex;
 
 use bevy::prelude::*;
-use rustcraft_protocol::protocol::ClientMessage;
 use rustcraft_protocol::transport::ClientTransport;
 
+use app_state::AppState;
 use events::EventsPlugin;
+use session::{cleanup_game_session, client_connect, start_game_session};
+use ui::main_menu::{MainMenuPlugin, MenuScreen};
+use ui::text_input::TextInputPlugin;
 
 /// Bevy Resource wrapping a boxed ClientTransport.
 #[derive(Resource)]
@@ -26,28 +31,22 @@ pub struct ClientTransportRes(pub Box<dyn ClientTransport>);
 pub struct LocalPlayerId(pub Option<u64>);
 
 /// Authentication parameters for connecting to the server.
-#[derive(Resource)]
-struct AuthConfig {
-    auth_code: String,
-    player_name: String,
+#[derive(Resource, Clone)]
+pub struct AuthConfig {
+    pub auth_code: String,
+    pub player_name: String,
 }
 
 /// The client plugin composes all client-side functionality:
 /// rendering, input, UI, prediction, etc.
 pub struct ClientPlugin {
-    transport: Mutex<Option<Box<dyn ClientTransport>>>,
     event_plugins: Mutex<Vec<Box<dyn events::RustcraftPlugin>>>,
-    auth_code: String,
-    player_name: String,
 }
 
 impl ClientPlugin {
-    pub fn new(transport: Box<dyn ClientTransport>, auth_code: String, player_name: String) -> Self {
+    pub fn new() -> Self {
         Self {
-            transport: Mutex::new(Some(transport)),
             event_plugins: Mutex::new(Vec::new()),
-            auth_code,
-            player_name,
         }
     }
 
@@ -59,22 +58,12 @@ impl ClientPlugin {
 
 impl Plugin for ClientPlugin {
     fn build(&self, app: &mut App) {
-        let transport = self
-            .transport
-            .lock()
-            .unwrap()
-            .take()
-            .expect("ClientPlugin transport already taken");
-
         let event_plugins = self.event_plugins.lock().unwrap().drain(..).collect();
 
-        app.insert_resource(ClientTransportRes(transport))
-            .insert_resource(LocalPlayerId::default())
-            .insert_resource(network::RemotePlayerStates::default())
-            .insert_resource(AuthConfig {
-                auth_code: self.auth_code.clone(),
-                player_name: self.player_name.clone(),
-            })
+        app.init_state::<AppState>()
+            .init_state::<MenuScreen>()
+            .enable_state_scoped_entities::<AppState>()
+            // Sub-plugins (all internally gated on AppState::InGame)
             .add_plugins(EventsPlugin::new_with(event_plugins))
             .add_plugins(world::WorldPlugin)
             .add_plugins(render::RenderPlugin)
@@ -84,15 +73,22 @@ impl Plugin for ClientPlugin {
             .add_plugins(ui::UiPlugin)
             .add_plugins(dropped_item::DroppedItemPlugin)
             .add_plugins(avatar::AvatarPlugin)
-            .add_systems(Startup, client_connect)
-            .add_systems(Update, network::client_receive_messages);
-    }
-}
+            // Menu
+            .add_plugins(MainMenuPlugin)
+            .add_plugins(TextInputPlugin)
+            // Session lifecycle
+            .add_systems(OnEnter(AppState::InGame), start_game_session)
+            .add_systems(OnExit(AppState::InGame), cleanup_game_session)
+            .add_systems(
+                Update,
+                (
+                    client_connect.run_if(in_state(AppState::InGame)),
+                    network::client_receive_messages
+                        .run_if(in_state(AppState::InGame)),
+                ),
+            );
 
-/// Send a Connect message to the server on startup.
-fn client_connect(transport: Res<ClientTransportRes>, auth: Res<AuthConfig>) {
-    transport.0.send(ClientMessage::Connect {
-        auth_code: auth.auth_code.clone(),
-        player_name: auth.player_name.clone(),
-    });
+        // Register embedded server systems (gated on resource_exists)
+        rustcraft_server::ServerPlugin::register_systems(app);
+    }
 }

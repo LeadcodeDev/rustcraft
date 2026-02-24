@@ -1,5 +1,6 @@
 use bevy::prelude::*;
 
+use crate::app_state::AppState;
 use crate::inventory::Inventory;
 use crate::player::camera::GameState;
 use crate::ui::block_preview::BlockPreviews;
@@ -24,6 +25,7 @@ pub fn spawn_hotbar(mut commands: Commands) {
     commands
         .spawn((
             HotbarRoot,
+            StateScoped(AppState::InGame),
             Node {
                 position_type: PositionType::Absolute,
                 bottom: Val::Px(10.0),

@@ -6,6 +6,7 @@ use bevy::prelude::*;
 use bevy::render::mesh::MeshAabb;
 use bevy::tasks::{Task, block_on, ComputeTaskPool};
 
+use crate::app_state::AppState;
 use crate::player::camera::FlyCam;
 use crate::world::chunk::{CHUNK_SIZE, ChunkMap, ChunkPos};
 use mesh::{ChunkSnapshot, build_chunk_mesh, build_chunk_mesh_from_snapshot};
@@ -43,7 +44,7 @@ impl Plugin for RenderPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<SpawnedChunks>()
             .init_resource::<PendingChunkMeshes>()
-            .add_systems(Startup, setup_chunk_material)
+            .add_systems(OnEnter(AppState::InGame), setup_chunk_material)
             .add_systems(
                 Update,
                 (
@@ -52,7 +53,8 @@ impl Plugin for RenderPlugin {
                     remesh_dirty_chunks,
                     despawn_unloaded_chunks,
                     update_chunk_visibility,
-                ),
+                )
+                    .run_if(in_state(AppState::InGame)),
             );
     }
 }
@@ -193,6 +195,7 @@ fn collect_chunk_mesh_tasks(
             let mesh_handle = meshes.add(mesh);
 
             commands.spawn((
+                StateScoped(AppState::InGame),
                 Mesh3d(mesh_handle),
                 MeshMaterial3d(chunk_material.0.clone()),
                 Transform::from_xyz(

@@ -51,6 +51,23 @@ impl ServerPlugin {
     pub fn auth_code(&self) -> &str {
         &self.auth_code
     }
+
+    /// Register server systems gated on resource existence.
+    /// Resources are inserted later when a solo game session starts.
+    pub fn register_systems(app: &mut App) {
+        app.add_systems(
+            Update,
+            (
+                server_process_messages,
+                server_stream_chunks.after(server_process_messages),
+                server_dropped_item_physics.after(server_stream_chunks),
+                server_pickup_items.after(server_dropped_item_physics),
+                server_auto_save.after(server_pickup_items),
+            )
+                .run_if(resource_exists::<ServerTransportRes>)
+                .run_if(resource_exists::<WorldSession>),
+        );
+    }
 }
 
 impl Plugin for ServerPlugin {

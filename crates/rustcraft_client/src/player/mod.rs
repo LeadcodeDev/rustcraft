@@ -7,6 +7,8 @@ use camera::{
     toggle_pause,
 };
 
+use crate::app_state::AppState;
+
 pub struct PlayerPlugin;
 
 impl Plugin for PlayerPlugin {
@@ -14,7 +16,10 @@ impl Plugin for PlayerPlugin {
         app.init_resource::<CameraSettings>()
             .init_resource::<GameMode>()
             .init_resource::<GameState>()
-            .add_systems(Startup, (spawn_camera, initial_cursor_grab))
+            .add_systems(
+                OnEnter(AppState::InGame),
+                (spawn_camera, initial_cursor_grab),
+            )
             .add_systems(
                 Update,
                 (
@@ -24,8 +29,12 @@ impl Plugin for PlayerPlugin {
                     toggle_inventory,
                     toggle_gamemode,
                     pause_on_focus_lost,
-                ),
+                )
+                    .run_if(in_state(AppState::InGame)),
             )
-            .add_systems(Last, enforce_cursor_state);
+            .add_systems(
+                Last,
+                enforce_cursor_state.run_if(in_state(AppState::InGame)),
+            );
     }
 }

@@ -3769,11 +3769,8 @@ name = "rustcraft"
 version = "0.1.0"
 dependencies = [
  "bevy",
- "clap",
  "rustcraft_client",
  "rustcraft_macros",
- "rustcraft_protocol",
- "rustcraft_server",
 ]
 
 [[package]]
@@ -3781,8 +3778,10 @@ name = "rustcraft_client"
 version = "0.1.0"
 dependencies = [
  "bevy",
+ "rand",
  "rustcraft_macros",
  "rustcraft_protocol",
+ "rustcraft_server",
 ]
 
 [[package]]

@@ -96,7 +96,7 @@ impl Plugin for AvatarPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<CameraMode>()
             .add_systems(
-                Startup,
+                OnEnter(crate::app_state::AppState::InGame),
                 spawn_avatar.after(crate::player::camera::spawn_camera),
             )
             .add_systems(
@@ -114,7 +114,8 @@ impl Plugin for AvatarPlugin {
                     spawn_remote_player,
                     despawn_remote_player,
                     update_remote_players,
-                ),
+                )
+                    .run_if(in_state(crate::app_state::AppState::InGame)),
             );
     }
 }
@@ -184,6 +185,7 @@ fn spawn_avatar(
     commands
         .spawn((
             PlayerAvatar,
+            StateScoped(crate::app_state::AppState::InGame),
             AvatarAnimation {
                 walk_phase: 0.0,
                 swing_amplitude: 0.0,

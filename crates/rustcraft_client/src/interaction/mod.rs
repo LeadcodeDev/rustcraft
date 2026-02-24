@@ -6,13 +6,18 @@ use raycast::{
     spawn_debug_overlay, toggle_debug_overlay, update_debug_overlay,
 };
 
+use crate::app_state::AppState;
+
 pub struct InteractionPlugin;
 
 impl Plugin for InteractionPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<DebugOverlayVisible>()
             .init_resource::<DropKeyState>()
-            .add_systems(Startup, (spawn_crosshair, spawn_debug_overlay))
+            .add_systems(
+                OnEnter(AppState::InGame),
+                (spawn_crosshair, spawn_debug_overlay),
+            )
             .add_systems(
                 Update,
                 (
@@ -20,7 +25,8 @@ impl Plugin for InteractionPlugin {
                     drop_active_item,
                     toggle_debug_overlay,
                     update_debug_overlay,
-                ),
+                )
+                    .run_if(in_state(AppState::InGame)),
             );
     }
 }

@@ -24,7 +24,8 @@ impl Plugin for DroppedItemPlugin {
                     handle_dropped_item_spawn,
                     handle_dropped_item_remove,
                     dropped_item_rotation,
-                ),
+                )
+                    .run_if(in_state(crate::app_state::AppState::InGame)),
             );
     }
 }
@@ -55,6 +56,7 @@ fn handle_dropped_item_spawn(
 
         let mut parent = commands.spawn((
             ServerDroppedItem { id: event.id },
+            StateScoped(crate::app_state::AppState::InGame),
             Transform::from_translation(event.position),
             GlobalTransform::default(),
             Visibility::Visible,

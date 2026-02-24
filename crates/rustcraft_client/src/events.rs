@@ -265,7 +265,8 @@ impl Plugin for EventsPlugin {
                     dispatch_items_collected,
                     dispatch_player_join,
                     dispatch_player_leave,
-                ),
+                )
+                    .run_if(in_state(crate::app_state::AppState::InGame)),
             );
     }
 }

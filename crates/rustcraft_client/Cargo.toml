@@ -5,5 +5,7 @@ edition = "2024"
 
 [dependencies]
 rustcraft_protocol = { path = "../rustcraft_protocol" }
+rustcraft_server = { path = "../rustcraft_server" }
 rustcraft_macros = { path = "../rustcraft_macros" }
 bevy = "0.15"
+rand = "0.8"

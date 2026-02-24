@@ -4,6 +4,7 @@ use bevy::render::render_resource::{
     Extent3d, TextureDescriptor, TextureDimension, TextureFormat, TextureUsages,
 };
 
+use crate::app_state::AppState;
 use crate::world::block::{BlockColor, BlockType};
 
 const PREVIEW_SIZE: u32 = 64;
@@ -79,6 +80,7 @@ pub fn setup_block_previews(
 
     // Light for all preview cubes
     commands.spawn((
+        StateScoped(AppState::InGame),
         PointLight {
             intensity: 2_000_000.0,
             shadows_enabled: false,
@@ -96,6 +98,7 @@ pub fn setup_block_previews(
 
         // Camera for this block
         commands.spawn((
+            StateScoped(AppState::InGame),
             Camera3d::default(),
             Camera {
                 order: -(10 + i as isize),
@@ -110,6 +113,7 @@ pub fn setup_block_previews(
 
         // Cube for this block
         commands.spawn((
+            StateScoped(AppState::InGame),
             PreviewCube,
             Mesh3d(cube_mesh.clone()),
             MeshMaterial3d(materials.add(StandardMaterial {

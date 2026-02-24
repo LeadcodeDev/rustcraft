@@ -1,6 +1,7 @@
 use bevy::prelude::*;
 
 use crate::ClientTransportRes;
+use crate::app_state::AppState;
 use crate::events::{InventoryDroppedEvent, InventoryPickedUpEvent};
 use rustcraft_protocol::protocol::ClientMessage;
 use crate::inventory::{Inventory, ItemStack, MAX_STACK};
@@ -52,6 +53,7 @@ pub fn spawn_inventory_screen(mut commands: Commands) {
     commands
         .spawn((
             InventoryScreenRoot,
+            StateScoped(AppState::InGame),
             Node {
                 width: Val::Percent(100.0),
                 height: Val::Percent(100.0),
@@ -125,6 +127,7 @@ pub fn spawn_inventory_screen(mut commands: Commands) {
     commands
         .spawn((
             DragGhost,
+            StateScoped(AppState::InGame),
             Node {
                 position_type: PositionType::Absolute,
                 width: Val::Px(PREVIEW_SIZE),

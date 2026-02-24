@@ -38,7 +38,10 @@ pub struct InventoryPlugin;
 impl Plugin for InventoryPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Inventory>()
-            .add_systems(Update, scroll_hotbar);
+            .add_systems(
+                Update,
+                scroll_hotbar.run_if(in_state(crate::app_state::AppState::InGame)),
+            );
     }
 }
 

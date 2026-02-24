@@ -3,6 +3,7 @@ use bevy::prelude::*;
 use bevy::window::CursorGrabMode;
 
 use crate::ClientTransportRes;
+use crate::app_state::AppState;
 use crate::avatar::CameraMode;
 use crate::events::PlayerMovedEvent;
 use crate::world::chunk::ChunkMap;
@@ -94,6 +95,7 @@ pub fn spawn_camera(mut commands: Commands) {
             velocity_y: 0.0,
             grounded: false,
         },
+        StateScoped(AppState::InGame),
     ));
 }
 
