@@ -47,6 +47,7 @@ pub enum GameState {
     #[default]
     Playing,
     Paused,
+    InInventory,
 }
 
 const PLAYER_HALF_WIDTH: f32 = 0.3;
@@ -85,7 +86,7 @@ pub fn camera_look(
     settings: Res<CameraSettings>,
     mut query: Query<&mut Transform, With<FlyCam>>,
 ) {
-    if *game_state == GameState::Paused {
+    if *game_state != GameState::Playing {
         return;
     }
     if mouse_motion.delta == Vec2::ZERO {
@@ -190,7 +191,7 @@ pub fn camera_movement(
     mut ev_moved: EventWriter<PlayerMoved>,
     mut query: Query<(&mut Transform, &mut Player), With<FlyCam>>,
 ) {
-    if *game_state == GameState::Paused {
+    if *game_state != GameState::Playing {
         return;
     }
 
@@ -297,7 +298,7 @@ pub fn toggle_gamemode(
     mut ev_changed: EventWriter<GameModeChanged>,
     mut query: Query<&mut Player>,
 ) {
-    if *game_state == GameState::Paused {
+    if *game_state != GameState::Playing {
         return;
     }
     if keys.just_pressed(KeyCode::F1) {
@@ -315,6 +316,40 @@ pub fn toggle_gamemode(
     }
 }
 
+pub fn pause_on_focus_lost(
+    mut game_state: ResMut<GameState>,
+    mut focus_events: EventReader<bevy::window::WindowFocused>,
+) {
+    for event in focus_events.read() {
+        if !event.focused && *game_state != GameState::Paused {
+            *game_state = GameState::Paused;
+        }
+    }
+}
+
+/// Continuously enforce cursor state to match GameState.
+/// Prevents macOS/Bevy from re-locking cursor when window regains focus.
+pub fn enforce_cursor_state(game_state: Res<GameState>, mut windows: Query<&mut Window>) {
+    let Ok(mut window) = windows.get_single_mut() else {
+        return;
+    };
+
+    match *game_state {
+        GameState::Playing => {
+            if window.cursor_options.grab_mode != CursorGrabMode::Locked {
+                window.cursor_options.grab_mode = CursorGrabMode::Locked;
+                window.cursor_options.visible = false;
+            }
+        }
+        GameState::Paused | GameState::InInventory => {
+            if window.cursor_options.grab_mode != CursorGrabMode::None {
+                window.cursor_options.grab_mode = CursorGrabMode::None;
+                window.cursor_options.visible = true;
+            }
+        }
+    }
+}
+
 pub fn toggle_pause(
     keys: Res<ButtonInput<KeyCode>>,
     mut game_state: ResMut<GameState>,
@@ -323,7 +358,7 @@ pub fn toggle_pause(
     if keys.just_pressed(KeyCode::Escape) {
         let new_state = match *game_state {
             GameState::Playing => GameState::Paused,
-            GameState::Paused => GameState::Playing,
+            GameState::Paused | GameState::InInventory => GameState::Playing,
         };
         *game_state = new_state;
 
@@ -333,11 +368,42 @@ pub fn toggle_pause(
                     window.cursor_options.grab_mode = CursorGrabMode::Locked;
                     window.cursor_options.visible = false;
                 }
-                GameState::Paused => {
+                GameState::Paused | GameState::InInventory => {
                     window.cursor_options.grab_mode = CursorGrabMode::None;
                     window.cursor_options.visible = true;
                 }
             }
+        }
+    }
+}
+
+pub fn toggle_inventory(
+    keys: Res<ButtonInput<KeyCode>>,
+    mut game_state: ResMut<GameState>,
+    mut windows: Query<&mut Window>,
+) {
+    if !keys.just_pressed(KeyCode::KeyE) {
+        return;
+    }
+
+    let new_state = match *game_state {
+        GameState::Playing => GameState::InInventory,
+        GameState::InInventory => GameState::Playing,
+        GameState::Paused => return,
+    };
+    *game_state = new_state;
+
+    if let Ok(mut window) = windows.get_single_mut() {
+        match new_state {
+            GameState::Playing => {
+                window.cursor_options.grab_mode = CursorGrabMode::Locked;
+                window.cursor_options.visible = false;
+            }
+            GameState::InInventory => {
+                window.cursor_options.grab_mode = CursorGrabMode::None;
+                window.cursor_options.visible = true;
+            }
+            GameState::Paused => {}
         }
     }
 }

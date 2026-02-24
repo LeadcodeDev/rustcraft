@@ -1,6 +1,7 @@
 pub mod mesh;
 
 use bevy::prelude::*;
+use bevy::render::mesh::MeshAabb;
 
 use crate::world::chunk::{CHUNK_SIZE, ChunkMap, ChunkPos};
 use mesh::build_chunk_mesh;
@@ -51,8 +52,9 @@ fn spawn_chunk_meshes(
 }
 
 fn remesh_dirty_chunks(
+    mut commands: Commands,
     mut chunk_map: ResMut<ChunkMap>,
-    query: Query<(&ChunkEntity, &Mesh3d)>,
+    query: Query<(Entity, &ChunkEntity, &Mesh3d)>,
     mut meshes: ResMut<Assets<Mesh>>,
 ) {
     let dirty_positions: Vec<ChunkPos> = chunk_map
@@ -69,10 +71,13 @@ fn remesh_dirty_chunks(
     for &chunk_pos in &dirty_positions {
         let new_mesh = build_chunk_mesh(chunk_pos, &chunk_map);
 
-        for (chunk_entity, mesh3d) in &query {
+        for (entity, chunk_entity, mesh3d) in &query {
             if chunk_entity.0 == chunk_pos {
                 if let Some(mesh) = meshes.get_mut(&mesh3d.0) {
                     *mesh = new_mesh;
+                    if let Some(aabb) = mesh.compute_aabb() {
+                        commands.entity(entity).insert(aabb);
+                    }
                     break;
                 }
             }

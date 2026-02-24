@@ -26,6 +26,29 @@ pub struct GameModeChanged {
     pub new_mode: GameMode,
 }
 
+#[derive(Event)]
+pub struct InventoryPickedUp {
+    pub slot: usize,
+    pub block_type: BlockType,
+    pub count: u32,
+}
+
+#[derive(Event)]
+pub struct InventoryDropped {
+    pub from_slot: usize,
+    pub to_slot: usize,
+    pub block_type: BlockType,
+    pub count: u32,
+}
+
+#[derive(Event)]
+pub struct ItemDroppedToWorld {
+    pub block_type: BlockType,
+    pub count: u32,
+    pub position: Vec3,
+    pub velocity: Vec3,
+}
+
 pub struct EventsPlugin;
 
 impl Plugin for EventsPlugin {
@@ -34,6 +57,9 @@ impl Plugin for EventsPlugin {
             .add_event::<BlockRemoved>()
             .add_event::<PlayerMoved>()
             .add_event::<GameModeChanged>()
+            .add_event::<InventoryPickedUp>()
+            .add_event::<InventoryDropped>()
+            .add_event::<ItemDroppedToWorld>()
             .add_systems(
                 Update,
                 (
@@ -41,6 +67,9 @@ impl Plugin for EventsPlugin {
                     log_block_removed,
                     log_player_moved,
                     log_gamemode_changed,
+                    log_inventory_picked_up,
+                    log_inventory_dropped,
+                    log_item_dropped_to_world,
                 ),
             );
     }
@@ -81,5 +110,32 @@ fn log_player_moved(mut reader: EventReader<PlayerMoved>) {
 fn log_gamemode_changed(mut reader: EventReader<GameModeChanged>) {
     for event in reader.read() {
         info!("[GameModeChanged] -> {:?}", event.new_mode);
+    }
+}
+
+fn log_inventory_picked_up(mut reader: EventReader<InventoryPickedUp>) {
+    for event in reader.read() {
+        info!(
+            "[InventoryPickedUp] {:?} x{} from slot {}",
+            event.block_type, event.count, event.slot
+        );
+    }
+}
+
+fn log_inventory_dropped(mut reader: EventReader<InventoryDropped>) {
+    for event in reader.read() {
+        info!(
+            "[InventoryDropped] {:?} x{} from slot {} to slot {}",
+            event.block_type, event.count, event.from_slot, event.to_slot
+        );
+    }
+}
+
+fn log_item_dropped_to_world(mut reader: EventReader<ItemDroppedToWorld>) {
+    for event in reader.read() {
+        info!(
+            "[ItemDroppedToWorld] {:?} x{} at ({:.1}, {:.1}, {:.1})",
+            event.block_type, event.count, event.position.x, event.position.y, event.position.z
+        );
     }
 }

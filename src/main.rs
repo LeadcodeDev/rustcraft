@@ -1,5 +1,7 @@
+mod dropped_item;
 mod events;
 mod interaction;
+mod inventory;
 mod player;
 mod render;
 mod ui;
@@ -20,8 +22,10 @@ fn main() {
         .add_plugins(world::WorldPlugin)
         .add_plugins(render::RenderPlugin)
         .add_plugins(player::PlayerPlugin)
+        .add_plugins(inventory::InventoryPlugin)
         .add_plugins(interaction::InteractionPlugin)
         .add_plugins(ui::UiPlugin)
+        .add_plugins(dropped_item::DroppedItemPlugin)
         .add_systems(Startup, setup_lighting)
         .run();
 }

@@ -1,20 +1,12 @@
 use bevy::prelude::*;
 
-use crate::events::{BlockPlaced, BlockRemoved};
+use crate::events::{BlockPlaced, BlockRemoved, ItemDroppedToWorld};
+use crate::inventory::Inventory;
 use crate::player::camera::{FlyCam, GameMode, GameState, Player};
 use crate::world::block::BlockType;
 use crate::world::chunk::ChunkMap;
 
 const MAX_REACH: f32 = 8.0;
-
-#[derive(Resource)]
-pub struct SelectedBlock(pub BlockType);
-
-impl Default for SelectedBlock {
-    fn default() -> Self {
-        Self(BlockType::Grass)
-    }
-}
 
 struct RaycastHit {
     block_pos: IVec3,
@@ -116,14 +108,16 @@ fn dda_raycast(origin: Vec3, direction: Vec3, chunk_map: &ChunkMap) -> Option<Ra
 
 pub fn block_interaction(
     game_state: Res<GameState>,
+    game_mode: Res<GameMode>,
     mouse: Res<ButtonInput<MouseButton>>,
     mut chunk_map: ResMut<ChunkMap>,
     camera_query: Query<&Transform, With<FlyCam>>,
-    selected: Res<SelectedBlock>,
+    mut inventory: ResMut<Inventory>,
     mut ev_placed: EventWriter<BlockPlaced>,
     mut ev_removed: EventWriter<BlockRemoved>,
+    mut ev_item_drop: EventWriter<ItemDroppedToWorld>,
 ) {
-    if *game_state == GameState::Paused {
+    if *game_state != GameState::Playing {
         return;
     }
 
@@ -154,30 +148,32 @@ pub fn block_interaction(
                 position: hit.block_pos,
                 block_type: old_block,
             });
+
+            if *game_mode == GameMode::Survival {
+                let block_center = Vec3::new(
+                    hit.block_pos.x as f32 + 0.5,
+                    hit.block_pos.y as f32 + 0.5,
+                    hit.block_pos.z as f32 + 0.5,
+                );
+                ev_item_drop.send(ItemDroppedToWorld {
+                    block_type: old_block,
+                    count: 1,
+                    position: block_center,
+                    velocity: Vec3::new(0.0, 4.0, 0.0),
+                });
+            }
         } else if right {
-            let place_pos = hit.block_pos + hit.normal;
-            chunk_map.set_block(place_pos.x, place_pos.y, place_pos.z, selected.0);
-            ev_placed.send(BlockPlaced {
-                position: place_pos,
-                block_type: selected.0,
-            });
-        }
-    }
-}
-
-pub fn select_block_type(keys: Res<ButtonInput<KeyCode>>, mut selected: ResMut<SelectedBlock>) {
-    let mappings = [
-        (KeyCode::Digit1, BlockType::Grass),
-        (KeyCode::Digit2, BlockType::Dirt),
-        (KeyCode::Digit3, BlockType::Stone),
-        (KeyCode::Digit4, BlockType::Sand),
-        (KeyCode::Digit5, BlockType::Wood),
-        (KeyCode::Digit6, BlockType::Leaves),
-    ];
-
-    for (key, block) in mappings {
-        if keys.just_pressed(key) {
-            selected.0 = block;
+            if let Some(block) = inventory.active_block() {
+                let place_pos = hit.block_pos + hit.normal;
+                chunk_map.set_block(place_pos.x, place_pos.y, place_pos.z, block);
+                if *game_mode == GameMode::Survival {
+                    inventory.consume_active();
+                }
+                ev_placed.send(BlockPlaced {
+                    position: place_pos,
+                    block_type: block,
+                });
+            }
         }
     }
 }

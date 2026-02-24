@@ -105,7 +105,7 @@ pub fn show_hide_pause_menu(
     for mut vis in &mut query {
         *vis = match *game_state {
             GameState::Paused => Visibility::Visible,
-            GameState::Playing => Visibility::Hidden,
+            _ => Visibility::Hidden,
         };
     }
 }
