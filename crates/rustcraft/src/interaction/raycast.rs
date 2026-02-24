@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 
-use crate::events::{BlockPlaced, BlockRemoved, ItemDroppedToWorld};
+use crate::events::{BlockPlacedEvent, BlockRemovedEvent, ItemDroppedToWorldEvent};
 use crate::inventory::Inventory;
 use crate::player::camera::{FlyCam, GameMode, GameState, Player};
 use crate::world::block::BlockType;
@@ -111,11 +111,11 @@ pub fn block_interaction(
     game_mode: Res<GameMode>,
     mouse: Res<ButtonInput<MouseButton>>,
     mut chunk_map: ResMut<ChunkMap>,
-    camera_query: Query<&Transform, With<FlyCam>>,
+    camera_query: Query<(&Transform, &Player), With<FlyCam>>,
     mut inventory: ResMut<Inventory>,
-    mut ev_placed: EventWriter<BlockPlaced>,
-    mut ev_removed: EventWriter<BlockRemoved>,
-    mut ev_item_drop: EventWriter<ItemDroppedToWorld>,
+    mut ev_placed: EventWriter<BlockPlacedEvent>,
+    mut ev_removed: EventWriter<BlockRemovedEvent>,
+    mut ev_item_drop: EventWriter<ItemDroppedToWorldEvent>,
 ) {
     if *game_state != GameState::Playing {
         return;
@@ -128,10 +128,11 @@ pub fn block_interaction(
         return;
     }
 
-    let Ok(cam_transform) = camera_query.get_single() else {
+    let Ok((cam_transform, player)) = camera_query.get_single() else {
         return;
     };
 
+    let location = player.location(cam_transform);
     let origin = cam_transform.translation;
     let direction = cam_transform.forward().as_vec3();
 
@@ -144,9 +145,10 @@ pub fn block_interaction(
                 hit.block_pos.z,
                 BlockType::Air,
             );
-            ev_removed.send(BlockRemoved {
+            ev_removed.send(BlockRemovedEvent {
                 position: hit.block_pos,
                 block_type: old_block,
+                player: location,
             });
 
             if *game_mode == GameMode::Survival {
@@ -155,11 +157,12 @@ pub fn block_interaction(
                     hit.block_pos.y as f32 + 0.5,
                     hit.block_pos.z as f32 + 0.5,
                 );
-                ev_item_drop.send(ItemDroppedToWorld {
+                ev_item_drop.send(ItemDroppedToWorldEvent {
                     block_type: old_block,
                     count: 1,
                     position: block_center,
                     velocity: Vec3::new(0.0, 4.0, 0.0),
+                    player: location,
                 });
             }
         } else if right {
@@ -169,9 +172,10 @@ pub fn block_interaction(
                 if *game_mode == GameMode::Survival {
                     inventory.consume_active();
                 }
-                ev_placed.send(BlockPlaced {
+                ev_placed.send(BlockPlacedEvent {
                     position: place_pos,
                     block_type: block,
+                    player: location,
                 });
             }
         }
@@ -291,5 +295,86 @@ pub fn update_debug_overlay(
             "XYZ: {:.1} / {:.1} / {:.1}\nFacing: {} ({:.1} / {:.1})\nGameMode: {:?}",
             pos.x, pos.y, pos.z, cardinal, yaw_deg, pitch_deg, *game_mode
         );
+    }
+}
+
+const DROP_HOLD_DELAY: f32 = 0.5;
+const DROP_REPEAT_INTERVAL: f32 = 0.05;
+
+#[derive(Resource, Default)]
+pub struct DropKeyState {
+    held_time: f32,
+    dropped_initial: bool,
+}
+
+pub fn drop_active_item(
+    game_state: Res<GameState>,
+    keys: Res<ButtonInput<KeyCode>>,
+    time: Res<Time>,
+    mut drop_state: ResMut<DropKeyState>,
+    mut inventory: ResMut<Inventory>,
+    camera_query: Query<(&Transform, &Player), With<FlyCam>>,
+    mut ev_item_drop: EventWriter<ItemDroppedToWorldEvent>,
+) {
+    if *game_state != GameState::Playing || !keys.pressed(KeyCode::KeyR) {
+        drop_state.held_time = 0.0;
+        drop_state.dropped_initial = false;
+        return;
+    }
+
+    let shift = keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight);
+
+    // Shift+R: drop entire stack at once, no repeat
+    if shift {
+        if !keys.just_pressed(KeyCode::KeyR) {
+            return;
+        }
+    } else {
+        let should_drop = if !drop_state.dropped_initial {
+            drop_state.dropped_initial = true;
+            true
+        } else {
+            drop_state.held_time += time.delta_secs();
+            if drop_state.held_time >= DROP_HOLD_DELAY {
+                drop_state.held_time -= DROP_REPEAT_INTERVAL;
+                true
+            } else {
+                false
+            }
+        };
+
+        if !should_drop {
+            return;
+        }
+    }
+
+    let Ok((transform, player)) = camera_query.get_single() else {
+        return;
+    };
+
+    let Some(stack) = inventory.slots[inventory.active_slot] else {
+        return;
+    };
+
+    let drop_count = if shift { stack.count } else { 1 };
+
+    let forward = transform.forward().as_vec3();
+    let drop_pos = player.position
+        + Vec3::Y * 1.7
+        + Vec3::new(forward.x, 0.0, forward.z).normalize_or_zero() * 0.5;
+
+    ev_item_drop.send(ItemDroppedToWorldEvent {
+        block_type: stack.block,
+        count: drop_count,
+        position: drop_pos,
+        velocity: forward * 3.0 + Vec3::Y * 2.0,
+        player: player.location(transform),
+    });
+
+    if shift {
+        let slot = inventory.active_slot;
+        inventory.slots[slot] = None;
+    } else {
+        inventory.consume_active();
     }
 }

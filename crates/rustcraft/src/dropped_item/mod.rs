@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 
-use crate::events::ItemDroppedToWorld;
+use crate::events::{ItemDroppedToWorldEvent, ItemsCollectedEvent};
 use crate::inventory::{Inventory, ItemStack};
 use crate::player::camera::{FlyCam, Player};
 use crate::world::chunk::ChunkMap;
@@ -44,7 +44,7 @@ fn spawn_dropped_items(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
-    mut ev_drop: EventReader<ItemDroppedToWorld>,
+    mut ev_drop: EventReader<ItemDroppedToWorldEvent>,
 ) {
     for event in ev_drop.read() {
         let cube_count = match event.count {
@@ -225,15 +225,17 @@ fn collect_dropped_items(
     mut commands: Commands,
     time: Res<Time>,
     mut inventory: ResMut<Inventory>,
-    player_query: Query<&Player, With<FlyCam>>,
-    mut item_query: Query<(Entity, &mut DroppedItem, &mut Transform)>,
+    player_query: Query<(&Transform, &Player), With<FlyCam>>,
+    mut item_query: Query<(Entity, &mut DroppedItem, &mut Transform), Without<FlyCam>>,
+    mut ev_collected: EventWriter<ItemsCollectedEvent>,
 ) {
-    let Ok(player) = player_query.get_single() else {
+    let Ok((player_transform, player)) = player_query.get_single() else {
         return;
     };
 
     let dt = time.delta_secs();
     let target = player.position + Vec3::Y * 0.5;
+    let mut collected: Vec<ItemStack> = Vec::new();
 
     for (entity, mut item, mut transform) in &mut item_query {
         if !item.collecting {
@@ -245,14 +247,26 @@ fn collect_dropped_items(
 
         let distance = transform.translation.distance(target);
         if distance < COLLECT_ABSORB_DIST {
+            let added = item.stack.count;
             let leftover = inventory.add_stack(item.stack.block, item.stack.count);
             if leftover == 0 {
+                collected.push(ItemStack::new(item.stack.block, added));
                 commands.entity(entity).despawn_recursive();
             } else {
-                // Inventory became full mid-collection
+                let actually_added = added - leftover;
+                if actually_added > 0 {
+                    collected.push(ItemStack::new(item.stack.block, actually_added));
+                }
                 item.stack.count = leftover;
                 item.collecting = false;
             }
         }
+    }
+
+    if !collected.is_empty() {
+        ev_collected.send(ItemsCollectedEvent {
+            items: collected,
+            player: player.location(player_transform),
+        });
     }
 }

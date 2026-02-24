@@ -2,17 +2,39 @@ use bevy::input::mouse::AccumulatedMouseMotion;
 use bevy::prelude::*;
 use bevy::window::CursorGrabMode;
 
-use crate::events::{GameModeChanged, PlayerMoved};
+use crate::events::{GameModeChangedEvent, PlayerMovedEvent};
 use crate::world::chunk::ChunkMap;
 
 #[derive(Component)]
 pub struct FlyCam;
+
+#[derive(Debug, Clone, Copy)]
+pub struct Location {
+    pub x: f32,
+    pub y: f32,
+    pub z: f32,
+    pub yaw: f32,
+    pub pitch: f32,
+}
 
 #[derive(Component)]
 pub struct Player {
     pub position: Vec3,
     pub velocity_y: f32,
     pub grounded: bool,
+}
+
+impl Player {
+    pub fn location(&self, transform: &Transform) -> Location {
+        let (yaw, pitch, _) = transform.rotation.to_euler(EulerRot::YXZ);
+        Location {
+            x: self.position.x,
+            y: self.position.y,
+            z: self.position.z,
+            yaw,
+            pitch,
+        }
+    }
 }
 
 #[derive(Resource)]
@@ -188,7 +210,7 @@ pub fn camera_movement(
     time: Res<Time>,
     chunk_map: Res<ChunkMap>,
     game_mode: Res<GameMode>,
-    mut ev_moved: EventWriter<PlayerMoved>,
+    mut ev_moved: EventWriter<PlayerMovedEvent>,
     mut query: Query<(&mut Transform, &mut Player), With<FlyCam>>,
 ) {
     if *game_state != GameState::Playing {
@@ -282,9 +304,10 @@ pub fn camera_movement(
         }
 
         if player.position != old_pos {
-            ev_moved.send(PlayerMoved {
+            ev_moved.send(PlayerMovedEvent {
                 old_position: old_pos,
                 new_position: player.position,
+                player: player.location(&transform),
             });
         }
         transform.translation = player.position + Vec3::new(0.0, EYE_HEIGHT, 0.0);
@@ -295,8 +318,8 @@ pub fn toggle_gamemode(
     game_state: Res<GameState>,
     keys: Res<ButtonInput<KeyCode>>,
     mut game_mode: ResMut<GameMode>,
-    mut ev_changed: EventWriter<GameModeChanged>,
-    mut query: Query<&mut Player>,
+    mut ev_changed: EventWriter<GameModeChangedEvent>,
+    mut query: Query<(&Transform, &mut Player), With<FlyCam>>,
 ) {
     if *game_state != GameState::Playing {
         return;
@@ -306,12 +329,13 @@ pub fn toggle_gamemode(
             GameMode::Creative => GameMode::Survival,
             GameMode::Survival => GameMode::Creative,
         };
-        for mut player in &mut query {
+        for (transform, mut player) in &mut query {
             player.velocity_y = 0.0;
+            ev_changed.send(GameModeChangedEvent {
+                new_mode: *game_mode,
+                player: player.location(transform),
+            });
         }
-        ev_changed.send(GameModeChanged {
-            new_mode: *game_mode,
-        });
         info!("GameMode: {:?}", *game_mode);
     }
 }

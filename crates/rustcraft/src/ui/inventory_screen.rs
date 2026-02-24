@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 
-use crate::events::{InventoryDropped, InventoryPickedUp, ItemDroppedToWorld};
+use crate::events::{InventoryDroppedEvent, InventoryPickedUpEvent, ItemDroppedToWorldEvent};
 use crate::inventory::{Inventory, ItemStack, MAX_STACK};
 use crate::player::camera::{FlyCam, GameState, Player};
 use crate::ui::block_preview::BlockPreviews;
@@ -331,9 +331,9 @@ pub fn drag_and_drop(
     windows: Query<&Window>,
     camera_query: Query<(&Transform, &Player), With<FlyCam>>,
     mut commands: Commands,
-    mut ev_picked: EventWriter<InventoryPickedUp>,
-    mut ev_dropped: EventWriter<InventoryDropped>,
-    mut ev_world_drop: EventWriter<ItemDroppedToWorld>,
+    mut ev_picked: EventWriter<InventoryPickedUpEvent>,
+    mut ev_dropped: EventWriter<InventoryDroppedEvent>,
+    mut ev_world_drop: EventWriter<ItemDroppedToWorldEvent>,
 ) {
     if *game_state != GameState::InInventory {
         return;
@@ -355,6 +355,11 @@ pub fn drag_and_drop(
     if !left_pressed && !right_pressed {
         return;
     }
+
+    let Ok((transform, player)) = camera_query.get_single() else {
+        return;
+    };
+    let location = player.location(transform);
 
     // Check if any slot is being clicked
     let mut clicked_slot: Option<usize> = None;
@@ -381,11 +386,12 @@ pub fn drag_and_drop(
                         if remaining > 0 {
                             drag_state.stack = Some(ItemStack::new(drag_stack.block, remaining));
                         } else {
-                            ev_dropped.send(InventoryDropped {
+                            ev_dropped.send(InventoryDroppedEvent {
                                 from_slot: drag_state.from_slot.unwrap_or(0),
                                 to_slot: slot_idx,
                                 block_type: drag_stack.block,
                                 count: drag_stack.count,
+                                player: location,
                             });
                             drag_state.clear();
                         }
@@ -393,11 +399,12 @@ pub fn drag_and_drop(
                         // Swap different types
                         let old = *existing;
                         inventory.slots[slot_idx] = Some(drag_stack);
-                        ev_dropped.send(InventoryDropped {
+                        ev_dropped.send(InventoryDroppedEvent {
                             from_slot: drag_state.from_slot.unwrap_or(0),
                             to_slot: slot_idx,
                             block_type: drag_stack.block,
                             count: drag_stack.count,
+                            player: location,
                         });
                         drag_state.from_slot = Some(slot_idx);
                         drag_state.stack = Some(old);
@@ -405,11 +412,12 @@ pub fn drag_and_drop(
                 } else {
                     // Empty slot — place drag
                     inventory.slots[slot_idx] = Some(drag_stack);
-                    ev_dropped.send(InventoryDropped {
+                    ev_dropped.send(InventoryDroppedEvent {
                         from_slot: drag_state.from_slot.unwrap_or(0),
                         to_slot: slot_idx,
                         block_type: drag_stack.block,
                         count: drag_stack.count,
+                        player: location,
                     });
                     drag_state.clear();
                 }
@@ -432,10 +440,11 @@ pub fn drag_and_drop(
             if left_pressed {
                 // Left click: take entire stack
                 if let Some(stack) = inventory.slots[slot_idx].take() {
-                    ev_picked.send(InventoryPickedUp {
+                    ev_picked.send(InventoryPickedUpEvent {
                         slot: slot_idx,
                         block_type: stack.block,
                         count: stack.count,
+                        player: location,
                     });
                     drag_state.from_slot = Some(slot_idx);
                     drag_state.stack = Some(stack);
@@ -448,10 +457,11 @@ pub fn drag_and_drop(
                     if existing.count == 0 {
                         inventory.slots[slot_idx] = None;
                     }
-                    ev_picked.send(InventoryPickedUp {
+                    ev_picked.send(InventoryPickedUpEvent {
                         slot: slot_idx,
                         block_type: block,
                         count: 1,
+                        player: location,
                     });
                     drag_state.from_slot = Some(slot_idx);
                     drag_state.stack = Some(ItemStack::new(block, 1));
@@ -460,36 +470,36 @@ pub fn drag_and_drop(
         }
     } else if drag_state.is_dragging() && (left_pressed || right_pressed) {
         // Click outside inventory — drop to world
-        if let Ok((transform, player)) = camera_query.get_single() {
-            let forward = transform.forward().as_vec3();
-            let drop_pos = player.position
-                + Vec3::Y * 1.7
-                + Vec3::new(forward.x, 0.0, forward.z).normalize_or_zero() * 0.5;
-            let throw_velocity = forward * 3.0 + Vec3::Y * 2.0;
+        let forward = transform.forward().as_vec3();
+        let drop_pos = player.position
+            + Vec3::Y * 1.7
+            + Vec3::new(forward.x, 0.0, forward.z).normalize_or_zero() * 0.5;
+        let throw_velocity = forward * 3.0 + Vec3::Y * 2.0;
 
-            if left_pressed {
-                // Left click: drop entire dragged stack
-                let stack = drag_state.stack.unwrap();
-                ev_world_drop.send(ItemDroppedToWorld {
-                    block_type: stack.block,
-                    count: stack.count,
-                    position: drop_pos,
-                    velocity: throw_velocity,
-                });
+        if left_pressed {
+            // Left click: drop entire dragged stack
+            let stack = drag_state.stack.unwrap();
+            ev_world_drop.send(ItemDroppedToWorldEvent {
+                block_type: stack.block,
+                count: stack.count,
+                position: drop_pos,
+                velocity: throw_velocity,
+                player: location,
+            });
+            drag_state.clear();
+        } else {
+            // Right click: drop 1 item
+            let drag_stack = drag_state.stack.as_mut().unwrap();
+            ev_world_drop.send(ItemDroppedToWorldEvent {
+                block_type: drag_stack.block,
+                count: 1,
+                position: drop_pos,
+                velocity: throw_velocity,
+                player: location,
+            });
+            drag_stack.count -= 1;
+            if drag_stack.count == 0 {
                 drag_state.clear();
-            } else {
-                // Right click: drop 1 item
-                let drag_stack = drag_state.stack.as_mut().unwrap();
-                ev_world_drop.send(ItemDroppedToWorld {
-                    block_type: drag_stack.block,
-                    count: 1,
-                    position: drop_pos,
-                    velocity: throw_velocity,
-                });
-                drag_stack.count -= 1;
-                if drag_stack.count == 0 {
-                    drag_state.clear();
-                }
             }
         }
     }
