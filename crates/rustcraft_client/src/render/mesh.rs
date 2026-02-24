@@ -218,20 +218,21 @@ pub fn build_chunk_mesh_from_snapshot(snap: &ChunkSnapshot) -> Mesh {
                     }
 
                     // Flip quad diagonal for AO anisotropy fix
+                    // Winding is CCW for Bevy's default front-face convention
                     if ao[0] + ao[2] <= ao[1] + ao[3] {
                         indices.push(base_index);
+                        indices.push(base_index + 2);
                         indices.push(base_index + 1);
-                        indices.push(base_index + 2);
                         indices.push(base_index);
-                        indices.push(base_index + 2);
                         indices.push(base_index + 3);
+                        indices.push(base_index + 2);
                     } else {
                         indices.push(base_index + 1);
+                        indices.push(base_index + 3);
                         indices.push(base_index + 2);
-                        indices.push(base_index + 3);
                         indices.push(base_index + 1);
-                        indices.push(base_index + 3);
                         indices.push(base_index);
+                        indices.push(base_index + 3);
                     }
                 }
             }

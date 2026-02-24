@@ -49,8 +49,6 @@ pub enum ClientMessage {
     },
     /// Toggle game mode request.
     ToggleGameMode,
-    /// Client evicted a cached chunk — server should re-send it if needed.
-    ChunkEvict { pos: (i32, i32) },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

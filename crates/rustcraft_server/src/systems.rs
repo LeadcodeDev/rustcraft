@@ -461,14 +461,6 @@ pub fn server_process_messages(
                 });
             }
 
-            ClientMessage::ChunkEvict { pos } => {
-                // Client evicted this chunk from cache — remove from its loaded set
-                // so server_stream_chunks will re-send it if still in view distance.
-                if let Some(loaded) = session.loaded_chunks_per_player.get_mut(&client_id) {
-                    loaded.remove(&ChunkPos(pos.0, pos.1));
-                }
-            }
-
             ClientMessage::ToggleGameMode => {
                 let Some(player) = session.players.get_mut(&client_id) else {
                     continue;
@@ -673,8 +665,15 @@ pub fn server_stream_chunks(mut session: ResMut<WorldSession>, transport: Res<Se
         // Find chunks to unload (loaded but no longer visible)
         let to_unload: Vec<ChunkPos> = currently_loaded.difference(&visible).copied().collect();
 
-        // Send new chunks
-        for chunk_pos in &to_send {
+        // Send new chunks (rate-limited to avoid bandwidth spikes)
+        const MAX_CHUNKS_PER_PLAYER_PER_TICK: usize = 4;
+        let sent: Vec<ChunkPos> = to_send
+            .iter()
+            .take(MAX_CHUNKS_PER_PLAYER_PER_TICK)
+            .copied()
+            .collect();
+
+        for chunk_pos in &sent {
             session.ensure_chunk_loaded(*chunk_pos);
             if let Some(chunk) = session.chunk_map.chunks.get(chunk_pos) {
                 transport.0.send(
@@ -702,7 +701,7 @@ pub fn server_stream_chunks(mut session: ResMut<WorldSession>, transport: Res<Se
             .loaded_chunks_per_player
             .entry(*player_id)
             .or_default();
-        for pos in to_send {
+        for pos in sent {
             loaded.insert(pos);
         }
         for pos in to_unload {

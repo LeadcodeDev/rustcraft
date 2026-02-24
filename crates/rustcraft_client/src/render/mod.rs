@@ -6,11 +6,9 @@ use bevy::prelude::*;
 use bevy::render::mesh::MeshAabb;
 use bevy::tasks::{Task, block_on, ComputeTaskPool};
 
-use crate::ClientTransportRes;
 use crate::player::camera::FlyCam;
 use crate::world::chunk::{CHUNK_SIZE, ChunkMap, ChunkPos};
 use mesh::{ChunkSnapshot, build_chunk_mesh, build_chunk_mesh_from_snapshot};
-use rustcraft_protocol::protocol::ClientMessage;
 
 /// Maximum number of chunk mesh tasks to dispatch per frame.
 const MAX_CHUNK_DISPATCHES_PER_FRAME: usize = 4;
@@ -53,7 +51,7 @@ impl Plugin for RenderPlugin {
                     collect_chunk_mesh_tasks,
                     remesh_dirty_chunks,
                     despawn_unloaded_chunks,
-                    evict_out_of_fov_chunks,
+                    update_chunk_visibility,
                 ),
             );
     }
@@ -63,8 +61,6 @@ fn setup_chunk_material(mut commands: Commands, mut materials: ResMut<Assets<Sta
     let handle = materials.add(StandardMaterial {
         base_color: Color::WHITE,
         perceptual_roughness: 0.9,
-        cull_mode: None,
-        double_sided: true,
         ..default()
     });
     commands.insert_resource(ChunkMaterial(handle));
@@ -178,19 +174,7 @@ fn collect_chunk_mesh_tasks(
     mut spawned: ResMut<SpawnedChunks>,
     mut pending: ResMut<PendingChunkMeshes>,
     chunk_map: Res<ChunkMap>,
-    camera_query: Query<&Transform, With<FlyCam>>,
 ) {
-    let (cam_pos_xz, cam_forward_xz) = if let Ok(cam_transform) = camera_query.get_single() {
-        let pos = cam_transform.translation;
-        let fwd = cam_transform.forward().as_vec3();
-        (
-            Vec2::new(pos.x, pos.z),
-            Vec2::new(fwd.x, fwd.z).normalize_or_zero(),
-        )
-    } else {
-        (Vec2::ZERO, Vec2::new(0.0, -1.0))
-    };
-
     let mut remaining = Vec::new();
 
     for (chunk_pos, mut task) in pending.tasks.drain(..) {
@@ -207,7 +191,6 @@ fn collect_chunk_mesh_tasks(
         if task.is_finished() {
             let mesh = block_on(&mut task);
             let mesh_handle = meshes.add(mesh);
-            let visible = is_chunk_in_fov(chunk_pos, cam_pos_xz, cam_forward_xz);
 
             commands.spawn((
                 Mesh3d(mesh_handle),
@@ -217,11 +200,6 @@ fn collect_chunk_mesh_tasks(
                     0.0,
                     (chunk_pos.1 * CHUNK_SIZE as i32) as f32,
                 ),
-                if visible {
-                    Visibility::Visible
-                } else {
-                    Visibility::Hidden
-                },
                 ChunkEntity(chunk_pos),
             ));
 
@@ -276,32 +254,30 @@ fn remesh_dirty_chunks(
 }
 
 /// Despawns chunk entities whose data has been removed from the ChunkMap.
+/// Explicitly removes mesh assets to avoid GC lag.
 fn despawn_unloaded_chunks(
     mut commands: Commands,
     chunk_map: Res<ChunkMap>,
     mut spawned: ResMut<SpawnedChunks>,
-    query: Query<(Entity, &ChunkEntity)>,
+    query: Query<(Entity, &ChunkEntity, &Mesh3d)>,
+    mut meshes: ResMut<Assets<Mesh>>,
 ) {
-    let to_remove: Vec<(Entity, ChunkPos)> = query
-        .iter()
-        .filter(|(_, chunk_entity)| !chunk_map.chunks.contains_key(&chunk_entity.0))
-        .map(|(entity, chunk_entity)| (entity, chunk_entity.0))
-        .collect();
-
-    for (entity, chunk_pos) in to_remove {
-        commands.entity(entity).despawn();
-        spawned.0.remove(&chunk_pos);
+    for (entity, chunk_entity, mesh3d) in &query {
+        if !chunk_map.chunks.contains_key(&chunk_entity.0) {
+            meshes.remove(&mesh3d.0);
+            commands.entity(entity).despawn();
+            spawned.0.remove(&chunk_entity.0);
+        }
     }
 }
 
-/// Evicts chunks outside the camera's FOV cone from ChunkMap.
-/// Marks the 4 XZ neighbors as dirty so they get remeshed with closed
-/// border faces (the evicted neighbor will read as Air in the snapshot).
-/// Notifies the server via `ChunkEvict` so it can re-stream later.
-fn evict_out_of_fov_chunks(
-    transport: Res<ClientTransportRes>,
-    mut chunk_map: ResMut<ChunkMap>,
+/// Toggles chunk entity visibility based on the camera's FOV cone.
+/// Data stays in ChunkMap so neighbor meshes remain correct at borders.
+/// True eviction is handled server-side via `ChunkUnload` when the player
+/// moves beyond VIEW_DISTANCE.
+fn update_chunk_visibility(
     camera_query: Query<&Transform, With<FlyCam>>,
+    mut query: Query<(&ChunkEntity, &mut Visibility)>,
 ) {
     let Ok(cam_transform) = camera_query.get_single() else {
         return;
@@ -312,32 +288,15 @@ fn evict_out_of_fov_chunks(
     let cam_pos_xz = Vec2::new(pos.x, pos.z);
     let cam_forward_xz = Vec2::new(fwd.x, fwd.z).normalize_or_zero();
 
-    let to_evict: Vec<ChunkPos> = chunk_map
-        .chunks
-        .keys()
-        .copied()
-        .filter(|cp| !is_chunk_in_fov(*cp, cam_pos_xz, cam_forward_xz))
-        .collect();
-
-    for cp in &to_evict {
-        chunk_map.chunks.remove(cp);
-        transport.0.send(ClientMessage::ChunkEvict {
-            pos: (cp.0, cp.1),
-        });
-    }
-
-    // Mark neighbors of evicted chunks as dirty so they remesh with closed borders.
-    for cp in &to_evict {
-        let neighbors = [
-            ChunkPos(cp.0 - 1, cp.1),
-            ChunkPos(cp.0 + 1, cp.1),
-            ChunkPos(cp.0, cp.1 - 1),
-            ChunkPos(cp.0, cp.1 + 1),
-        ];
-        for n in &neighbors {
-            if let Some(chunk) = chunk_map.chunks.get_mut(n) {
-                chunk.dirty = true;
-            }
+    for (chunk_entity, mut visibility) in &mut query {
+        let in_fov = is_chunk_in_fov(chunk_entity.0, cam_pos_xz, cam_forward_xz);
+        let new_vis = if in_fov {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        };
+        if *visibility != new_vis {
+            *visibility = new_vis;
         }
     }
 }
